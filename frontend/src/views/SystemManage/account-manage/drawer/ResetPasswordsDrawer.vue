@@ -1,0 +1,138 @@
+<script setup lang="ts">
+import type { FieldRule, FormInstance } from '@arco-design/web-vue'
+import { Message } from '@arco-design/web-vue'
+import sysAccountApi from '@/api/sys/account'
+import useCurrentUserSecurity from '@/use/useCurrentUserSecurity'
+
+const { t } = useI18n()
+const userStore = user()
+const { encryptCurrentUserPassword } = useCurrentUserSecurity()
+
+const props = withDefaults(
+    defineProps<{
+        visible: boolean
+        type: 'loginPwd' | '2FA'
+        userId: string
+        width?: number
+    }>(),
+    {
+    },
+)
+
+const emit = defineEmits<{
+    'update:visible': [value: boolean]
+    onSuccess: []
+}>()
+
+const formRef = ref<FormInstance>()
+const isSubmitLoading = ref(false)
+const formState = reactive({
+    facode: '',
+    password: '',
+})
+
+const title = computed(() => (props.type === 'loginPwd' ? t('重置登录密码') : t('重置2FA')))
+
+const visibleProxy = computed({
+    get: () => props.visible,
+    set: (value: boolean) => emit('update:visible', value),
+})
+
+const formRules: Record<string, FieldRule[]> = {
+    facode: [
+        { required: true, message: t('请输入6位数字验证码') },
+        { match: /^\d{6}$/, message: t('请输入6位数字验证码') },
+    ],
+    password: [{ required: true, message: t('请输入'), trigger: 'blur' }],
+}
+
+const resetForm = (): void => {
+    formState.facode = ''
+    formState.password = ''
+    formRef.value?.resetFields()
+}
+
+const handCancel = (): void => {
+    userStore.getUserInfo()
+    resetForm()
+    visibleProxy.value = false
+}
+
+/**
+ * 重置密码/重置 2FA 都复用这一个提交入口：
+ * - 通过 props.type 显式分支具体接口，避免动态下标调用带来的类型丢失
+ * - 提交 loading 统一在 finally 里收口，确保异常分支也能恢复按钮状态
+ */
+const handleAddOrUpdate = async (): Promise<void> => {
+    if (isSubmitLoading.value) return
+
+    isSubmitLoading.value = true
+
+    try {
+        const password = await encryptCurrentUserPassword(formState.password)
+
+        if (props.type === 'loginPwd') {
+            await sysAccountApi.sysUserResetPassword({
+                ...formState,
+                password,
+                userId: props.userId,
+                type: 1,
+            })
+        } else {
+            await sysAccountApi.setSysUserResetSecret({
+                ...formState,
+                password,
+                userId: props.userId,
+            })
+        }
+
+        Message.success(t('操作成功'))
+    } finally {
+        isSubmitLoading.value = false
+    }
+}
+
+const handleSubmit = async (): Promise<void> => {
+    const errors = await formRef.value?.validate()
+    if (errors) return
+
+    await handleAddOrUpdate()
+    handCancel()
+    emit('onSuccess')
+}
+</script>
+
+<template>
+    <a-drawer
+        v-model:visible="visibleProxy"
+        :title="title"
+        :width="props.width ?? 480"
+        :ok-loading="isSubmitLoading"
+        :mask-closable="false"
+        @cancel="handCancel"
+        @ok="handleSubmit"
+    >
+        <a-form
+            ref="formRef"
+            :model="formState"
+            :rules="formRules"
+            :label-col-props="{ span: 5 }"
+            layout="horizontal"
+        >
+            <a-form-item :label="t('登录密码')" field="password">
+                <a-input-password
+                    v-model="formState.password"
+                    size="small"
+                    :placeholder="t('请输入')"
+                />
+            </a-form-item>
+            <a-form-item :label="t('2FA验证')" field="facode">
+                <a-input-password
+                    v-model="formState.facode"
+                    size="small"
+                    :placeholder="t('请输入')"
+                />
+            </a-form-item>
+        </a-form>
+    </a-drawer>
+</template>

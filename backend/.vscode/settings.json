@@ -1,0 +1,11 @@
+{
+    "terminal.integrated.env.linux": {},
+    "emeraldwalk.runonsave": {
+        "commands": [
+            {
+                "match": "\\.(go|rs)$",
+                "cmd": "go run ${workspaceFolder}/cmd/main.go"
+            }
+        ]
+    }
+}

@@ -1,0 +1,266 @@
+/* Tailwind layers live in the project stylesheet entry so Vite always compiles them with the local config. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Shared app design tokens and global shell styles. */
+
+:root {
+    --color-primary-6: #00bd8d;
+    --app-min-width: 1120px;
+    /* 主背景与内容卡片做轻层级区分，贴近设计稿的浅灰底。 */
+    --app-bg: #f3f5f7;
+    --app-surface: #ffffff;
+    --app-surface-strong: #ffffff;
+    --app-surface-soft: #f3f5f7;
+    --app-surface-muted: #eef1f4;
+    --app-accent-soft: rgb(68 86 111 / 14%);
+    --app-divider: #e6ebf1;
+    --app-text: #1f2937;
+    --app-text-muted: #6b7788;
+    --app-overlay: rgb(15 23 42 / 10%);
+    --app-sidebar-bg: #111519;
+    --app-sidebar-surface: rgb(255 255 255 / 5%);
+    --app-sidebar-surface-strong: rgb(255 255 255 / 8%);
+    --app-sidebar-text: rgb(248 250 252 / 96%);
+    --app-sidebar-text-muted: rgb(226 232 240 / 72%);
+    --app-control-bg: #ffffff;
+    --app-control-hover-bg: #edf1f7;
+    --app-control-text: #4e5968;
+    --app-control-text-muted: #8c97a8;
+    --app-status-success: #00b42a;
+    --app-status-warning: #ff7d00;
+    --app-status-danger: #f53f3f;
+    --app-status-offline: #8f5f5a;
+    --app-tags-track-bg: transparent;
+    --app-tags-track-border: transparent;
+    --app-tags-item-bg: transparent;
+    --app-tags-item-text: #8b97a8;
+    --app-tags-hover-bg: #f2f5f8;
+    --app-tags-active-bg: color-mix(in srgb, var(--color-primary-6) 14%, #ffffff 86%);
+    --app-tags-active-text: var(--color-primary-6);
+    --app-tags-active-border: transparent;
+    --app-tags-active-close-text: color-mix(in srgb, var(--color-primary-6) 84%, #0f172a 16%);
+    --app-tags-active-close-hover-text: var(--color-primary-6);
+    --app-tag-close-text: #a5afbc;
+    --app-tag-close-hover-text: #718095;
+    --app-table-header-bg: #F7F8FB;
+    --app-table-header-text: #3d4a5c;
+    --app-table-row-hover: #f7f9fc;
+    --app-search-panel-bg: #FBFBFD;
+    --app-skeleton-bg: #edf1f7;
+    --app-login-card-bg: #ffffff;
+    --app-login-panel-bg: #f8fafc;
+    --app-login-tip-bg: #ffffff;
+    --app-sider-width: 260px;
+    --app-sider-collapsed-width: 88px;
+    --app-header-height: 88px;
+    --app-shell-top-height: 154px;
+    --page-shell-gap: 8px;
+    --app-pane-radius: 12px;
+    --app-shell-joint-radius: 34px;
+    --app-shell-content-bg: var(--app-surface-strong);
+    --app-header-bg: var(--app-surface-strong);
+    --app-header-divider: #e7ecf1;
+    /* body 渐变起点提亮，顶部有轻微光感 */
+    --app-body-glow-start: rgb(255 255 255 / 72%);
+    --app-body-glow-end: rgb(255 255 255 / 0%);
+    --app-body-gradient-start: #f7f8fa;
+    --app-body-gradient-end: #edf1f5;
+    --content-pane-min-height: calc(100dvh - var(--app-shell-top-height) - (var(--page-shell-gap) * 3));
+    --scrollbar-size: 10px;
+    --scrollbar-track: rgb(148 163 184 / 8%);
+    --scrollbar-thumb: rgb(100 116 139 / 42%);
+    --scrollbar-thumb-hover: rgb(22 93 255 / 52%);
+    --scrollbar-thumb-active: rgb(22 93 255 / 68%);
+}
+
+/* Dark mode only flips semantic tokens here; component-level migration can happen incrementally afterwards. */
+html body[data-app-theme-resolved='dark'] {
+    --app-bg: #070b10;
+    --app-surface: #0b1016;
+    --app-surface-strong: #0e141b;
+    --app-surface-soft: #090e14;
+    --app-surface-muted: #151d27;
+    --app-accent-soft: rgb(148 163 184 / 12%);
+    --app-divider: #1f2a36;
+    --app-text: #dce5f1;
+    --app-text-muted: #8b9aad;
+    --app-overlay: rgb(10 12 18 / 48%);
+    --app-sidebar-bg: #101217;
+    --app-sidebar-surface: rgb(255 255 255 / 6%);
+    --app-sidebar-surface-strong: rgb(255 255 255 / 10%);
+    --app-sidebar-text: rgb(241 245 249 / 92%);
+    --app-sidebar-text-muted: rgb(226 232 240 / 66%);
+    --app-control-bg: #242933;
+    --app-control-hover-bg: #2d3440;
+    --app-control-text: #dbe3ee;
+    --app-control-text-muted: #9ca7b8;
+    --app-status-success: #3fd26f;
+    --app-status-warning: #ffb65c;
+    --app-status-danger: #ff7d7d;
+    --app-status-offline: #efb0aa;
+    --app-tags-track-bg: transparent;
+    --app-tags-track-border: transparent;
+    --app-tags-item-bg: transparent;
+    --app-tags-item-text: #8ea1b7;
+    --app-tags-hover-bg: #102238;
+    --app-tags-active-bg: var(--color-primary-6);
+    --app-tags-active-text: #ffffff;
+    --app-tags-active-border: transparent;
+    --app-tags-active-close-text: rgb(255 255 255 / 88%);
+    --app-tags-active-close-hover-text: #ffffff;
+    --app-tag-close-text: #9ca7b8;
+    --app-tag-close-hover-text: #edf2f8;
+    --app-table-header-bg: #111a24;
+    --app-table-header-text: #d7dfea;
+    --app-table-row-hover: rgb(255 255 255 / 4%);
+    --app-search-panel-bg: #111923;
+    --app-skeleton-bg: #1a2330;
+    --app-login-card-bg: #0e141b;
+    --app-login-panel-bg: #0b1016;
+    --app-login-tip-bg: #121318;
+    --app-header-bg: var(--app-surface-strong);
+    --app-header-divider: #1b2632;
+    --app-body-glow-start: rgb(24 40 58 / 24%);
+    --app-body-glow-end: rgb(7 11 16 / 0%);
+    --app-body-gradient-start: #0a1016;
+    --app-body-gradient-end: #070b10;
+    --scrollbar-track: rgb(226 232 240 / 10%);
+    --scrollbar-thumb: rgb(226 232 240 / 22%);
+    --scrollbar-thumb-hover: rgb(226 232 240 / 32%);
+    --scrollbar-thumb-active: rgb(226 232 240 / 44%);
+}
+
+/* Arco dark mode defaults are too close to pure black for this project.
+   Re-map its dark palette to a berry-tinted neutral scale so popups, inputs, and menus
+   feel consistent with the existing primary brand color. */
+html body[arco-theme='dark'] {
+    --gray-1: 20, 22, 27;
+    --gray-2: 30, 33, 40;
+    --gray-3: 46, 50, 60;
+    --gray-4: 64, 69, 82;
+    --gray-5: 86, 92, 107;
+    --gray-6: 117, 124, 141;
+    --gray-7: 156, 164, 181;
+    --gray-8: 197, 204, 217;
+    --gray-9: 226, 231, 238;
+    --gray-10: 244, 247, 251;
+    --color-border: #343b48;
+    --color-bg-1: #15181e;
+    --color-bg-2: #1d2129;
+    --color-bg-3: #252a34;
+    --color-bg-4: #2e3440;
+    --color-bg-5: #373e4b;
+    --color-bg-popup: var(--color-bg-5);
+    --color-bg-white: #f8fafc;
+    --color-text-1: rgb(244 247 251 / 92%);
+    --color-text-2: rgb(226 232 240 / 76%);
+    --color-text-3: rgb(197 204 217 / 56%);
+    --color-text-4: rgb(197 204 217 / 34%);
+    --color-fill-1: rgb(255 255 255 / 5%);
+    --color-fill-2: rgb(255 255 255 / 9%);
+    --color-fill-3: rgb(255 255 255 / 14%);
+    --color-fill-4: rgb(255 255 255 / 18%);
+    --color-secondary: rgb(255 255 255 / 8%);
+    --color-secondary-hover: rgb(255 255 255 / 14%);
+    --color-secondary-active: rgb(255 255 255 / 20%);
+    --color-secondary-disabled: rgb(255 255 255 / 6%);
+    --color-tooltip-bg: #373e4b;
+    --color-spin-layer-bg: rgb(20 22 27 / 72%);
+    --color-menu-dark-bg: #15181e;
+    --color-menu-light-bg: #1d2129;
+    --color-menu-dark-hover: rgb(255 255 255 / 8%);
+    --color-mask-bg: rgb(10 12 18 / 68%);
+}
+
+/* Arco writes its default radius tokens on `body`, so we override them here with higher selector priority. */
+html body {
+    --border-radius-small: 6px;
+    --border-radius-medium: 6px;
+    --border-radius-large: 6px;
+}
+
+.main-wrapper,
+.page-container,
+.table-container {
+    box-sizing: border-box;
+    display: flow-root;
+    border-radius: var(--app-pane-radius);
+    background: var(--app-surface-strong);
+    min-height: var(--content-pane-min-height);
+    height: fit-content;
+    overflow: visible;
+}
+
+html,
+body,
+#app {
+    min-height: 100%;
+}
+
+html {
+    scrollbar-gutter: stable;
+}
+
+body {
+    min-width: var(--app-min-width);
+    background:
+        radial-gradient(circle at top left, var(--app-body-glow-start) 0%, var(--app-body-glow-end) 34%),
+        linear-gradient(180deg, var(--app-body-gradient-start) 0%, var(--app-body-gradient-end) 100%);
+    color: var(--app-text);
+}
+
+/* 关闭 Arco table 在 border 模式下的上/左/右外边框，保留底部边框线。 */
+.arco-table-border:not(.arco-table-border-cell) .arco-table-container {
+    border-top: 0 !important;
+    border-left: 0 !important;
+    border-right: 0 !important;
+}
+
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+*::-webkit-scrollbar {
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
+}
+
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+*::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--scrollbar-thumb) 88%, white 12%) 0%,
+        var(--scrollbar-thumb) 100%
+    );
+    background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--scrollbar-thumb-hover) 84%, white 16%) 0%,
+        var(--scrollbar-thumb-hover) 100%
+    );
+    background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:active {
+    background: linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--scrollbar-thumb-active) 82%, white 18%) 0%,
+        var(--scrollbar-thumb-active) 100%
+    );
+    background-clip: padding-box;
+}

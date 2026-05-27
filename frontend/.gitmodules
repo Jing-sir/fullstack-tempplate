@@ -1,0 +1,3 @@
+[submodule "ai-knowledge"]
+	path = ai-knowledge
+	url = git@github.com:AIKnowledgeProject/UpayProjectKnowledge.git

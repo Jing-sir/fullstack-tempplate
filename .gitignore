@@ -1,0 +1,48 @@
+# System files
+.DS_Store
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+dev-dist/
+dist-ssr/
+bin/
+auth-service
+
+# Test and report outputs
+coverage/
+playwright-report/
+test-results/
+blob-report/
+
+# Local root/backend environment files
+/.env
+/.env.*
+/backend/.env
+
+# Editor and local workspace files
+.idea/
+.cursor/
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Existing packaged artifacts
+new-upay-manage
+new-upay-manage.zip

@@ -1,0 +1,122 @@
+schema: spec-driven
+
+context: |
+  # 项目概述
+  后台管理系统，将旧项目（Vue 3 + Ant Design Vue + Options API）全量迁移到新项目架构。
+
+  # 技术栈
+  Vue 3 + TypeScript + Vite + Pinia + Vue Router + vue-i18n + Arco Design + Tailwind + SCSS
+  包管理器: pnpm | 路径别名: @ -> src
+
+  # 核心迁移规范（必须严格遵守）
+
+  ## 列表页
+  - 所有列表页必须使用 TableSearchWrap 组件，禁止手写 a-form + a-table + pagination 三件套
+  - searchConf 必须是 computed<SearchOption[]>，保证 i18n 响应
+  - columns 也用 computed<ColumnType[]>，title 全部走 t()
+  - 状态列用 cellPreset.type='statusText'，状态 preset 在 src/enums/statusText.ts 维护
+  - 标签列用 cellPreset.type='labelTags'
+  - 操作列用 cellPreset.type='actionButtons'，禁止手写 #action slot
+  - 导出用 exportConfig 对象，禁止手写导出按钮
+  - 工具栏按钮用 toolbarButtons 配置，禁止用 slot
+  - 分页/刷新由 TableSearchWrap 内建，无需手写
+
+  ## 确认操作
+  - 启用/禁用/删除/重置密码等破坏性操作必须用 useConfirmAction，禁止手写 Modal.confirm
+
+  ## 弹窗/抽屉
+  - 所有 overlay（Modal/Drawer）放 modal/ 子目录
+  - 父页面用 v-if 控制挂载，@close + @success 事件通知父页面
+  - 新增/编辑默认用 Drawer（宽度 ≤ 50vw）
+
+  ## API 层
+  - 继承 Api 基类（src/api/api.ts），禁止直接用 axios
+  - 文件按后端 URL 前缀归档（/sys/... → sys.ts）
+  - 返回类型必须显式声明，接口类型 export 出去供页面使用
+  - 禁止 Promise<any>
+
+  ## 目录结构
+  src/views/ModuleName/feature-name/Index.vue
+                                    components/  ← 页面私有非弹窗子组件
+                                    modal/       ← 所有 overlay
+
+  ## 样式
+  - 优先 Tailwind 原子类
+  - 颜色用 --color-primary-6 等 token，不硬编码
+  - 状态色/active 色用共享 token
+
+  ## i18n
+  - 所有静态文案用中文原文作 key：t('登录')、t('请输入')
+  - 不用英文语义 key
+
+  ## keep-alive 刷新
+  - 使用 useOnActivated(() => tableRef.value?.refresh()) 代替 onActivated + 手写刷新逻辑
+
+  ## 权限按钮 buttonKey 规则（历史兼容，务必注意）
+  PermissionButton 有两套匹配策略（新旧兼容并存）：
+  - 新匹配（优先）：`${route.name}-${buttonKey}`，如 route.name=agentCardOpeningConfiguration + buttonKey=edit → 匹配后端 agentCardOpeningConfiguration-edit
+  - 旧兼容（回退）：按 parentId 构建菜单树，查找 component === buttonKey 的节点（旧后端权限格式）
+  判断原则：
+  - 优先用纯动作名（'edit'、'add'）对应新后端权限格式
+  - 若该页面后端历史上按 'routeName:action' 录入，则保留旧格式以走旧兼容路径
+  - 跨路由引用才用 'routeName:action' 格式
+  - 按钮不显示时，先核实后端菜单 component 字段实际值，再定 buttonKey 格式
+  - 工具栏 toolbarButtons 的 buttonKey 同样遵守上述规则
+
+  ## 表格列排序
+  - 日期类列（createTime、updateTime、startTime、endTime 等）默认加排序：sortable: { sorter: true }
+  - 其他列按实际业务需求加排序，不强制全部开启
+
+  # 旧项目技术债（迁移时需修复）
+  - Options API (defineComponent) → <script setup> Composition API
+  - ant-design-vue → @arco-design/web-vue（组件名/API 均不同）
+  - 手写 a-form + a-table + Pagination 三件套 → TableSearchWrap
+  - Modal.confirm → useConfirmAction
+  - 弹窗平铺在模块根目录 → modal/ 子目录
+  - Promise<any> → 显式类型
+  - 内嵌 interface → export interface
+  - 静态文案直接写中文字符串 → t('...')
+
+  # 核心原则：架构换新，逻辑零损耗
+  迁移目标是「用新架构重新表达旧逻辑」，而非重写。
+  - 旧项目每一个搜索条件、每一个字段、每一个操作按钮、每一个确认文案、每一个 API 参数都必须在新代码中有对应体现
+  - 迁移前必须通读旧模块全部 .vue 文件，逐一核对功能点，不得遗漏
+  - 如有旧项目逻辑不清晰的地方，在 proposal.md 的 Non-goals 或备注中明确标注，不得静默丢弃
+
+  # 自测要求
+  每个迁移模块交付前必须逐项验证：
+
+  ## 代码质量
+  1. pnpm run typecheck 无新增 TS 错误
+  2. pnpm exec eslint <改动文件> 无报错
+  3. 无 any 类型滥用：API 返回类型、searchConf、columns 均有显式类型
+  4. 无未使用的 import、变量、ref
+  5. 逻辑函数不超过 50 行，超过须拆分为具名 helper 或 composable
+  6. 模板中无复杂内联表达式，复杂判断下沉到 script
+
+  ## 接口数据
+  7. 页面功能：列表正常加载、搜索过滤生效、分页跳转正常、导出（若有）正常触发
+  8. searchConf 中 type='select' 且 options 来自接口的字段：必须验证下拉选项在页面打开后能正确加载，不能出现空列表或加载失败无提示
+  9. 弹窗/抽屉内的 select/radio 若依赖接口数据：必须验证打开时数据已就绪，不能出现空选项
+
+  ## 交互完整性
+  10. 弹窗功能：新增/编辑/详情 打开正常、表单提交正常、关闭后列表刷新
+  11. 确认操作（删除/禁用/重置等）：二次确认弹窗正常弹出，确认后操作执行，取消后无副作用
+  12. 权限按钮：有权限时显示、无权限时隐藏，不影响页面布局
+
+  ## 路由与 keep-alive
+  13. 路由已注册到 permissionRoutes.ts，页面可通过侧边菜单正常访问
+  14. tabbar 切换验证：在 A 页输入搜索条件 → 切换到 B 页 → 切回 A 页，搜索条件和列表数据必须保持缓存（keep-alive）
+  15. 侧边栏重新点击同一菜单时，页面应刷新重新请求数据（useOnActivated 行为正确）
+
+rules:
+  proposal:
+    - 必须列出该模块在旧项目的所有 .vue 文件清单
+    - 必须说明与新项目已有组件的依赖关系
+    - 必须说明需要新增的 API 文件
+    - Non-goals 章节必须明确写出本次不迁移的内容
+  tasks:
+    - 每个 task 粒度：单个文件或单个操作（不要合并多文件到一个 task）
+    - 每个 task 结尾必须有验证步骤
+    - 最后一个 task 必须是「运行 pnpm run typecheck + pnpm exec eslint 自测」
+    - task 描述用中文

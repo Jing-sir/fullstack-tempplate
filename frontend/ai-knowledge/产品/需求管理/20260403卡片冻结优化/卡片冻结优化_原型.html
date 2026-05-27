@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>卡片冻结优化原型</title>
+  <style>
+    body{margin:0;font:12px/1.5 "PingFang SC","Microsoft YaHei",sans-serif;background:#f5f7fb;color:#1f2d3d}
+    .app{display:flex;min-height:100vh}.side{width:188px;background:linear-gradient(180deg,#0b5cff,#0848cb);color:#fff;padding:14px 0}.brand{padding:0 18px 16px;font-size:18px;font-weight:700}.mt,.mi{padding:10px 22px}.mt{font-weight:600}.mi{padding-left:40px;font-size:13px}.mi.a{margin-right:10px;border-radius:999px 0 0 999px;background:#fff;color:#0b5cff;font-weight:700}
+    .main{flex:1;min-width:0}.top{height:56px;padding:0 18px;border-bottom:1px solid #e8edf5;background:#fff;display:flex;align-items:center;justify-content:space-between;color:#7c8aa5}.ct{padding:14px 18px 24px}.tabs{display:flex;gap:10px;margin-bottom:14px}.tab{height:28px;padding:0 12px;border:0;border-radius:4px;background:#fff;color:#607086;cursor:pointer}.tab.a{background:#18c281;color:#fff;font-weight:700}.pg{display:none}.pg.a{display:block}
+    .tips,.panel{border:1px solid #e8edf5;border-radius:10px;background:#fff}.tips{padding:10px 12px;margin-bottom:12px;border-style:dashed;background:#f7fbff;color:#5d6e86}.panel{padding:14px}
+    .grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:12px 16px;margin-bottom:14px}.f label{display:block;margin-bottom:6px;color:#617189}.box,.range{height:32px;padding:0 10px;border:1px solid #e8edf5;border-radius:4px;background:#f8fbff;color:#a0acc0;display:flex;align-items:center;justify-content:space-between}.range{padding:0}.range span{flex:1;padding:0 10px}.range em{font-style:normal;color:#b4bfd0}
+    .bar{display:flex;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap}.l,.r{display:flex;gap:10px;flex-wrap:wrap}.btn{height:32px;padding:0 14px;border:1px solid transparent;border-radius:4px;cursor:pointer}.b{background:#1677ff;border-color:#1677ff;color:#fff}.w{background:#fff;border-color:#d8e1ef;color:#52637b}.d{background:#f3f5f8;border-color:#ebeef3;color:#b6becd;cursor:not-allowed}
+    .sum{display:flex;gap:22px;flex-wrap:wrap;margin-bottom:10px;color:#5f7088}.sum strong{color:#44546d}.tbl{overflow:auto;border:1px solid #e8edf5;border-radius:8px;background:#fff}table{width:100%;border-collapse:collapse;font-size:12px;min-width:2600px}table.ev{min-width:1800px}th,td{padding:12px 10px;border-bottom:1px solid #eff3f8;text-align:left;white-space:nowrap;color:#44546d}th{background:#fafbfd;color:#66778f;font-weight:700}
+    .tg{display:inline-flex;padding:2px 8px;border-radius:999px;font-weight:700}.ok{color:#16a34a;background:#e9f8ee}.lk{color:#fa8c16;background:#fff4e8}.fz{color:#f04438;background:#fff1f0}.ops{display:inline-flex;gap:10px}.ln{border:0;background:none;padding:0;cursor:pointer;color:#1677ff}.ln.o{color:#fa8c16}.note{margin-top:12px;color:#6f8099}
+    .mask{position:fixed;inset:0;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(15,23,42,.35)}.mask.o{display:flex}.modal{width:min(640px,100%);border:1px solid #e6ebf2;border-radius:8px;background:#fff;overflow:hidden;box-shadow:0 10px 28px rgba(15,35,95,.08)}.mh,.mf{display:flex;justify-content:space-between;align-items:center;padding:16px 20px}.mh{border-bottom:1px solid #e8edf5}.mf{border-top:1px solid #e8edf5;justify-content:flex-end;gap:10px}.mb{padding:18px 20px}.mg{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 16px}.ff label{display:block;margin-bottom:6px;color:#5f7088}.ff.x{grid-column:1 / -1}.ro,.sel,textarea{width:100%;border:1px solid #dfe6f1;border-radius:4px;background:#fff;color:#44546d}.ro,.sel{height:36px;padding:0 12px;display:flex;align-items:center;justify-content:space-between}.ro{background:#fafbfd;color:#66778f}textarea{min-height:110px;padding:10px 12px;resize:vertical}.cnt{display:flex;justify-content:space-between;margin-top:6px;color:#95a1b5}.hint{margin-top:14px;padding:12px;border:1px dashed #bfd4ff;border-radius:6px;background:#f8fbff;color:#61738d}
+    @media (max-width:1440px){.grid{grid-template-columns:repeat(5,minmax(0,1fr))}}@media (max-width:1024px){.side{display:none}.grid,.mg{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (max-width:720px){.ct{padding:10px}.top{height:auto;padding:10px;flex-direction:column;align-items:flex-start}.grid,.mg{grid-template-columns:1fr}.bar{flex-direction:column;align-items:flex-start}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="side">
+      <div class="brand">邀清返佣管理</div>
+      <div class="mt">闪兑</div><div class="mt">资产管理</div><div class="mt">数字资产管理</div><div class="mt">充值管理</div><div class="mt">卡片管理</div>
+      <div class="mi a">卡片资产管理</div><div class="mi">卡片资产流水表</div><div class="mi">卡事件记录列表</div><div class="mi">开卡申请管理</div><div class="mi">开卡申请历史</div><div class="mi">库存管理</div><div class="mi">持卡人资料</div><div class="mi">用户卡消费订单</div>
+      <div class="mt">异常管理</div>
+    </aside>
+    <div class="main">
+      <header class="top">
+        <div>☰　首页 / 卡片管理 / <span id="crumb">卡片资产管理</span></div>
+        <div>时区切换：UTC+0　chen</div>
+      </header>
+      <div class="ct">
+        <div class="tabs">
+          <button class="tab a" data-page="asset">卡片资产管理</button>
+          <button class="tab" data-page="event">卡事件记录列表</button>
+        </div>
+
+        <section class="pg a" id="page-asset">
+          <div class="tips">原型按现有后台风格生成：左侧蓝色菜单、顶部白色工具栏、白底筛选区和大表格结构保持不变。本期仅在操作栏新增“锁卡 / 解锁”弹窗。</div>
+          <div class="panel">
+            <div class="grid">
+              <div class="f"><label>用户UID：</label><div class="box">请输入</div></div>
+              <div class="f"><label>所属代理商：</label><div class="box">请输入</div></div>
+              <div class="f"><label>用户标签：</label><div class="box">请选择</div></div>
+              <div class="f"><label>Broker Card ID：</label><div class="box">请输入</div></div>
+              <div class="f"><label>卡名称：</label><div class="box">请输入</div></div>
+              <div class="f"><label>渠道ID：</label><div class="box">请输入</div></div>
+              <div class="f"><label>渠道名称：</label><div class="box">请输入</div></div>
+              <div class="f"><label>卡号：</label><div class="box">请输入</div></div>
+              <div class="f"><label>卡ID：</label><div class="box">请输入</div></div>
+              <div class="f"><label>卡片唯一ID：</label><div class="box">请输入</div></div>
+              <div class="f"><label>状态：</label><div class="box">全部 ▾</div></div>
+              <div class="f"><label>实/虚卡：</label><div class="box">全部 ▾</div></div>
+              <div class="f"><label>Broker客户编号：</label><div class="box">请输入</div></div>
+              <div class="f"><label>渠道客户编号：</label><div class="box">请输入</div></div>
+              <div class="f"><label>资金类型：</label><div class="box">全部 ▾</div></div>
+              <div class="f"><label>卡模式：</label><div class="box">全部 ▾</div></div>
+              <div class="f"><label>管理费收取方式：</label><div class="box">全部 ▾</div></div>
+              <div class="f"><label>代理商管理费：</label><div class="box">请输入</div></div>
+              <div class="f"><label>免管理费管理：</label><div class="box">全部 ▾</div></div>
+              <div class="f"><label>新卡减免：</label><div class="box">全部 ▾</div></div>
+              <div class="f"><label>申请日期：</label><div class="range"><span>开始时间</span><em>~</em><span>结束时间</span></div></div>
+            </div>
+            <div class="bar"><div class="l"><button class="btn b">更新全部</button><button class="btn b">导出</button><button class="btn b">快照所有卡资产</button><button class="btn d">批量销卡</button></div><div class="r"><button class="btn b">搜索</button><button class="btn w">重置</button></div></div>
+            <div class="sum"><span>显示卡总余额：<strong>56266161.632395</strong></span><span>卡渠道总余额：<strong>5170032.931712</strong></span><span>可用总余额：<strong>51337589.769772</strong></span><span>冻结总余额：<strong>13318.5923</strong></span><span>消费手续费总余额：<strong>4928571.862623</strong></span></div>
+            <div class="tbl">
+              <table>
+                <thead>
+                  <tr><th>用户UID</th><th>所属代理商</th><th>用户标签</th><th>Broker Card ID</th><th>卡名称</th><th>资金类型</th><th>卡状态</th><th>卡号</th><th>卡ID</th><th>卡唯一ID</th><th>渠道卡ID</th><th>创建日期</th><th>更新时间</th><th>渠道ID</th><th>渠道名称</th><th>实/虚卡</th><th>Broker客户编号</th><th>渠道客户编号</th><th>卡模式</th><th>卡渠道资金</th><th>可用余额</th><th>冻结金额</th><th>消费手续费余额</th><th>显示卡余额</th><th>可消费金额(USD)</th><th>管理费收取方式</th><th>代理商管理费</th><th>免管理费管理</th><th>新卡减免</th><th>申请日期</th><th>操作</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>2039644450042253314</td><td>代理商A</td><td>高净值</td><td>BC-7002-001</td><td>Reap USD Card</td><td>主钱包</td><td><span class="tg ok">正常</span></td><td>****7002</td><td>card_7002</td><td>uniq_7002_001</td><td>rp_card_7002</td><td>2026-03-20 10:28:11</td><td>2026-03-29 09:15:08</td><td>reap_01</td><td>Reap</td><td>实体卡</td><td>broker_cus_7002</td><td>channel_cus_7002</td><td>标准模式</td><td>100.00</td><td>100.000000</td><td>0.000000</td><td>0.000000</td><td>100.000000</td><td>100.000000</td><td>年费</td><td>0</td><td>是</td><td>否</td><td>2026-03-20</td><td><span class="ops"><button class="ln">详情</button><button class="ln">更新数据</button><button class="ln o" data-open="lock" data-card="7002" data-card-id="card_7002" data-status="正常">锁卡</button></span></td></tr>
+                  <tr><td>2039387455791861762</td><td>代理商B</td><td>普通用户</td><td>BC-8831-005</td><td>Reap Shared Card</td><td>共享钱包</td><td><span class="tg lk">已锁卡</span></td><td>****8831</td><td>card_8831</td><td>uniq_8831_001</td><td>rp_card_8831</td><td>2026-03-18 08:10:01</td><td>2026-03-29 08:09:23</td><td>reap_01</td><td>Reap</td><td>虚拟卡</td><td>broker_cus_8831</td><td>channel_cus_8831</td><td>共享模式</td><td>100.00</td><td>0.000000</td><td>0.000000</td><td>0.000000</td><td>0.000000</td><td>100.000000</td><td>年费</td><td>0</td><td>是</td><td>否</td><td>2026-03-18</td><td><span class="ops"><button class="ln">详情</button><button class="ln">更新数据</button><button class="ln" data-open="unlock" data-card="8831" data-card-id="card_8831" data-status="已锁卡" data-origin="UPay_Risk_Transaction">解锁</button></span></td></tr>
+                  <tr><td>2039256380864225282</td><td>代理商A</td><td>高风险观察</td><td>BC-2709-003</td><td>Reap Virtual Card</td><td>主钱包</td><td><span class="tg fz">已冻结</span></td><td>****2709</td><td>card_2709</td><td>uniq_2709_001</td><td>rp_card_2709</td><td>2026-03-10 17:22:41</td><td>2026-03-29 08:02:31</td><td>reap_01</td><td>Reap</td><td>虚拟卡</td><td>broker_cus_2709</td><td>channel_cus_2709</td><td>标准模式</td><td>124.83</td><td>124.830000</td><td>0.000000</td><td>1.270000</td><td>126.100000</td><td>0.000000</td><td>年费</td><td>0</td><td>是</td><td>否</td><td>2026-03-10</td><td><span class="ops"><button class="ln">详情</button><button class="ln">更新数据</button><button class="ln" data-open="unlock" data-card="2709" data-card-id="card_2709" data-status="已冻结" data-origin="SUSPECTED_FRAUD_CVV">解锁</button></span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="page-section" id="page-event">
+          <div class="tips">卡事件记录列表是新增页面，样式沿用当前后台相同的筛选区、工具栏和大表格风格，用于统一查询冻结、锁卡、解锁事件及对应原因。</div>
+          <div class="panel">
+            <div class="grid">
+              <div class="f"><label>用户UID：</label><div class="box">请输入</div></div>
+              <div class="f"><label>Broker Card ID：</label><div class="box">请输入</div></div>
+              <div class="f"><label>卡号尾号：</label><div class="box">请输入</div></div>
+              <div class="f"><label>卡ID：</label><div class="box">请输入</div></div>
+              <div class="f"><label>事件类型：</label><div class="box">全部 ▾</div></div>
+              <div class="f"><label>原因码：</label><div class="box">全部 ▾</div></div>
+              <div class="f"><label>原因来源：</label><div class="box">全部 ▾</div></div>
+              <div class="f"><label>发起方：</label><div class="box">全部 ▾</div></div>
+              <div class="f"><label>操作人：</label><div class="box">请输入</div></div>
+              <div class="f"><label>渠道名称：</label><div class="box">全部 ▾</div></div>
+              <div class="f"><label>状态：</label><div class="box">全部 ▾</div></div>
+              <div class="f"><label>时间范围：</label><div class="range"><span>开始时间</span><em>~</em><span>结束时间</span></div></div>
+            </div>
+            <div class="bar"><div class="l"><button class="btn b">搜索</button><button class="btn w">重置</button><button class="btn w">导出</button></div></div>
+            <div class="tbl">
+              <table class="ev">
+                <thead>
+                  <tr><th>事件时间</th><th>用户UID</th><th>Broker Card ID</th><th>卡号尾号</th><th>卡ID</th><th>事件类型</th><th>事件后卡状态</th><th>原因码</th><th>原因说明</th><th>原因来源</th><th>发起方</th><th>操作人</th><th>解锁说明</th><th>备注</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>2026-03-29 08:02:31</td><td>2039256380864225282</td><td>BC-2709-003</td><td>2709</td><td>card_2709</td><td>冻结</td><td>Frozen</td><td>SUSPECTED_FRAUD_CVV</td><td>1小时内连续3次 CVV 输入错误</td><td>CHANNEL</td><td>Reap</td><td>-</td><td>-</td><td>渠道回流</td></tr>
+                  <tr><td>2026-03-29 08:09:23</td><td>2039387455791861762</td><td>BC-8831-005</td><td>8831</td><td>card_8831</td><td>锁卡</td><td>Locked</td><td>UPay_Risk_Transaction</td><td>因检测到风险交易，卡片已被临时锁定</td><td>PLATFORM</td><td>UPay后台</td><td>Luke</td><td>-</td><td>人工锁卡</td></tr>
+                  <tr><td>2026-03-29 09:15:08</td><td>2039387455791861762</td><td>BC-8831-005</td><td>8831</td><td>card_8831</td><td>解锁</td><td>Active</td><td>UPay_Risk_Transaction</td><td>原锁卡原因回显</td><td>PLATFORM</td><td>UPay后台</td><td>Luke</td><td>人工审核通过，恢复使用</td><td>人工解锁</td></tr>
+                  <tr><td>2026-03-28 19:08:20</td><td>203900000000001145</td><td>BC-1145-010</td><td>1145</td><td>card_1145</td><td>冻结</td><td>Frozen</td><td>UNKNOWN</td><td>暂无法识别具体渠道原因</td><td>UNKNOWN</td><td>Reap</td><td>-</td><td>-</td><td>原因兜底</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="note">该页面用于统一查看每一次冻结、锁卡、解锁事件，以及对应原因码、原因说明、来源、发起方和操作人。</div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="mask" id="lock-modal">
+    <div class="modal">
+      <div class="mh"><strong>人工锁卡</strong><button class="ln" data-close="lock-modal">关闭</button></div>
+      <div class="mb">
+        <div class="mg">
+          <div class="ff"><label>卡号尾号</label><div class="ro" id="lock-card-last4">7002</div></div>
+          <div class="ff"><label>卡ID</label><div class="ro" id="lock-card-id">card_7002</div></div>
+          <div class="ff"><label>当前状态</label><div class="ro" id="lock-status">正常</div></div>
+          <div class="ff"><label>原因类型</label><div class="sel">UPay_Risk_Transaction <span>▾</span></div></div>
+          <div class="ff x"><label>原因说明</label><textarea id="lock-reason">因检测到风险交易，卡片已被临时锁定</textarea><div class="cnt"><span>必填，1-100 个字符，去除首尾空格后校验，不支持纯空格</span><strong id="lock-reason-count">20/100</strong></div></div>
+        </div>
+        <div class="hint">错误提示规则：未填写时提示“请输入原因说明”；超过 100 字提示“原因说明最多输入100个字符”；前后端都需要校验。</div>
+      </div>
+      <div class="mf"><button class="btn w" data-close="lock-modal">取消</button><button class="btn b">确认锁卡</button></div>
+    </div>
+  </div>
+
+  <div class="mask" id="unlock-modal">
+    <div class="modal">
+      <div class="mh"><strong>人工解锁</strong><button class="ln" data-close="unlock-modal">关闭</button></div>
+      <div class="mb">
+        <div class="mg">
+          <div class="ff"><label>卡号尾号</label><div class="ro" id="unlock-card-last4">8831</div></div>
+          <div class="ff"><label>卡ID</label><div class="ro" id="unlock-card-id">card_8831</div></div>
+          <div class="ff"><label>当前状态</label><div class="ro" id="unlock-status">已锁卡</div></div>
+          <div class="ff"><label>原锁卡/冻结原因</label><div class="ro" id="unlock-origin-reason">UPay_Risk_Transaction</div></div>
+          <div class="ff x"><label>解锁说明</label><textarea id="unlock-reason">人工审核通过，恢复使用</textarea><div class="cnt"><span>非必填，0-100 个字符；如填写，建议写入卡事件记录</span><strong id="unlock-reason-count">12/100</strong></div></div>
+        </div>
+        <div class="hint">解锁弹窗重点是回显原锁卡/冻结原因，并补充解锁说明；不新增新的风险原因类型，避免和冻结/锁卡原因混淆。</div>
+      </div>
+      <div class="mf"><button class="btn w" data-close="unlock-modal">取消</button><button class="btn b">确认解锁</button></div>
+    </div>
+  </div>
+
+  <script>
+    const tabs=document.querySelectorAll("[data-page]");
+    const pages=document.querySelectorAll(".page-section");
+    const crumb=document.getElementById("crumb");
+    tabs.forEach((tab)=>{tab.addEventListener("click",()=>{tabs.forEach((item)=>item.classList.toggle("a",item===tab));pages.forEach((page)=>page.classList.toggle("a",page.id==="page-"+tab.dataset.page));crumb.textContent=tab.dataset.page==="asset"?"卡片资产管理":"卡事件记录列表";});});
+    const openButtons=document.querySelectorAll("[data-open]");
+    const closeButtons=document.querySelectorAll("[data-close]");
+    function openModal(id){document.getElementById(id).classList.add("o")}
+    function closeModal(id){document.getElementById(id).classList.remove("o")}
+    openButtons.forEach((button)=>{button.addEventListener("click",()=>{if(button.dataset.open==="lock"){document.getElementById("lock-card-last4").textContent=button.dataset.card||"";document.getElementById("lock-card-id").textContent=button.dataset.cardId||"";document.getElementById("lock-status").textContent=button.dataset.status||"";openModal("lock-modal");}if(button.dataset.open==="unlock"){document.getElementById("unlock-card-last4").textContent=button.dataset.card||"";document.getElementById("unlock-card-id").textContent=button.dataset.cardId||"";document.getElementById("unlock-status").textContent=button.dataset.status||"";document.getElementById("unlock-origin-reason").textContent=button.dataset.origin||"暂无法获取";openModal("unlock-modal");}});});
+    closeButtons.forEach((button)=>{button.addEventListener("click",()=>closeModal(button.dataset.close));});
+    document.querySelectorAll(".mask").forEach((mask)=>{mask.addEventListener("click",(event)=>{if(event.target===mask){mask.classList.remove("o");}});});
+    function bindCounter(textareaId,counterId,maxLength){const textarea=document.getElementById(textareaId);const counter=document.getElementById(counterId);const update=()=>{const len=textarea.value.length;counter.textContent=len+"/"+maxLength;};textarea.maxLength=maxLength;textarea.addEventListener("input",update);update();}
+    bindCounter("lock-reason","lock-reason-count",100);
+    bindCounter("unlock-reason","unlock-reason-count",100);
+  </script>
+</body>
+</html>
