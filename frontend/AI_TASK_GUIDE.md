@@ -86,7 +86,8 @@ AI 不能凭感觉写：
 | UID/编号/单号 | `cellPreset.type = 'copyableText'`，后面展示复制 icon，复制后提示成功/失败 | 默认省略号、静默复制或手写复制 slot |
 | 状态列 | `cellPreset.type = 'statusText'` | 页面里写状态 map |
 | 标签列 | `cellPreset.type = 'labelTags'` | 手写 `a-tag` 循环 |
-| API | 按 URL 前缀放 `src/api`，继承 `Api` | 组件里直接 `axios` |
+| API | 后端 URL 必须使用固定版本前缀 `/api/v{数字}`，例如 `/api/v1/login`；前端通过 `VITE_APP_BASE_URL=/api/v1` + API 方法路径 `/login` 拼出完整地址 | 写 `/api/login`、`/login` 直连后端、组件里直接 `axios` |
+| API 模块 | 按 URL 前缀放 `src/api`，继承 `Api` | 组件里直接 `axios` |
 | 弹窗/抽屉 | 页面目录 `modal/`，父页面 `v-if` 挂载 | 浮层混进 `components/` |
 | 二次确认 | `useConfirmAction().confirmAndRun` | 每页手写 `Modal.confirm` |
 | 操作提示 | `Message.success/error/warning(t('中文'))` | 静默成功或裸中文 |
@@ -295,7 +296,21 @@ API 信息（没有就写无）：
 - 无 / 有：
 ```
 
-没有验证命令结果，就不能说“通过”。
+没有验证命令结果，就不能说”通过”。
+
+## 13. 自测要求（强制）
+
+**每次实现新功能或修改已有接口后，必须端到端自测所有改动点**，包括：
+
+1. `pnpm run typecheck` 通过 —— 没有类型错误
+2. `pnpm exec eslint <改动文件>` 通过 —— 没有 lint 警告
+3. 启动后端后，在浏览器或 curl 验证：
+   - 列表页能正常加载数据（接口返回 `{list, total}` 结构）
+   - 新增/编辑提交后列表刷新、数据落盘
+   - 删除后数据消失
+   - 状态切换后开关状态一致
+4. API 文件新增方法时，对应页面调用路径要跑通（不能仅靠 typecheck）
+5. 操作日志等中间件要验证数据库有记录（`total > 0`）
 
 ## 12. 验收时只看这些
 

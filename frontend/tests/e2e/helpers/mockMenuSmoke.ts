@@ -111,7 +111,7 @@ function isTableEndpoint(pathname: string): boolean {
 
 /**
  * 针对列表页 smoke 的统一接口桩：
- * - 覆盖启动所需接口（pwdIv/getInfo/menuList）
+ * - 覆盖启动所需接口（security/iv、users、menus）
  * - 其余 /api/v1/* 默认返回空表格或空对象，保证页面可挂载
  */
 export async function mockMenuSmokeApis(page: Page) {
@@ -120,24 +120,24 @@ export async function mockMenuSmokeApis(page: Page) {
         const url = new URL(request.url())
         const pathname = url.pathname
 
-        if (pathname.endsWith('/sysConfig/pwdIv')) {
-            return fulfill(route, 'mock-pwd-iv')
+        if (pathname.endsWith('/security/iv')) {
+            return fulfill(route, { iv_id: 'mock-iv-id', iv: 'mock-pwd-iv' })
         }
 
-        if (pathname.endsWith('/sys/user/getInfo')) {
+        if (pathname.endsWith('/users')) {
             return fulfill(route, {
-                account: 'e2e-admin',
-                bindAccount: '',
-                fullName: 'E2E Admin',
-                isFACode: 0,
-                roleId: '1',
-                roleName: 'admin',
-                state: 1,
-                userId: 'e2e-user-id',
+                users: [
+                    {
+                        uid: 'e2e-user-id',
+                        username: 'e2e-admin',
+                        two_fa_enabled: false,
+                        status: 1,
+                    },
+                ],
             })
         }
 
-        if (pathname.endsWith('/sys/menu/list')) {
+        if (pathname.endsWith('/menus')) {
             return fulfill(route, menuList)
         }
 
@@ -154,15 +154,17 @@ export async function mockMenuSmokeApis(page: Page) {
             })
         }
 
-        if (pathname.endsWith('/sys/login')) {
+        if (pathname.endsWith('/login')) {
             return fulfill(route, {
-                initLogin: false,
-                opPassword: true,
-                opPasswordSetting: true,
-                passwordError: false,
-                passwordErrorNum: 0,
                 token: 'mock-manage-token',
-                googleState: 0,
+                twoFaRequired: false,
+                twoFaSetupRequired: false,
+                user: {
+                    uid: 'e2e-user-id',
+                    username: 'e2e-admin',
+                    two_fa_enabled: false,
+                    status: 1,
+                },
             })
         }
 

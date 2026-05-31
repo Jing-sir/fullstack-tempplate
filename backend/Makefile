@@ -1,7 +1,7 @@
 .PHONY: run test vet build tidy
 
 run:
-	go run ./cmd
+	go run ./cmd/server
 
 test:
 	go test ./...
@@ -14,4 +14,3 @@ build:
 
 tidy:
 	go mod tidy
-

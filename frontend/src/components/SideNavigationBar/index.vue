@@ -104,7 +104,7 @@ const buildMenuNode = (route: SidebarRoute, parentPath = ''): SidebarMenuNode | 
         key: currentPath,
         title: formatRouteTitle(route.meta?.title),
         icon: route.meta?.icon ? String(route.meta.icon) : undefined,
-        role: route.meta?.role ? String(route.meta.role) : undefined,
+        name: typeof route.name === 'string' ? route.name : undefined,
     }
 
     /**
@@ -157,9 +157,9 @@ const findSelectedNode = (
 ): SidebarMenuNode | null => {
     const leafNodes = flattenLeafNodes(items)
 
-    // 优先根据 role 匹配
+    // 优先根据路由 name 匹配
     if (currentRole) {
-        const matchedByRole = leafNodes.find((item) => item.role === currentRole)
+        const matchedByRole = leafNodes.find((item) => item.name === currentRole)
         if (matchedByRole) return matchedByRole
     }
 
@@ -240,7 +240,7 @@ const selectedKeys = computed<string[]>(() => {
     const selectedNode = findSelectedNode(
         visibleSidebarMenuItems.value,
         currentRoute.path,
-        String(currentRoute.meta?.role ?? ''),
+        typeof currentRoute.name === 'string' ? currentRoute.name : '',
     )
 
     return selectedNode ? [selectedNode.key] : []

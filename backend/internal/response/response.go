@@ -6,14 +6,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// 通用返回结构
+// Response 统一响应体结构，所有接口返回格式一致
 type Response[T any] struct {
 	Code int    `json:"code"`
 	Msg  string `json:"msg"`
 	Data T      `json:"data,omitempty"`
 }
 
-// 成功返回
+// Success 返回业务成功响应，HTTP 状态码固定为 200
 func Success[T any](c *gin.Context, data T) {
 	c.JSON(200, Response[T]{
 		Code: int(consts.Success),
@@ -22,7 +22,8 @@ func Success[T any](c *gin.Context, data T) {
 	})
 }
 
-// 失败返回
+// Error 返回业务错误响应，HTTP 状态码与业务状态码保持一致。
+// msg 为可选覆盖消息，不传时使用 BizCodeMsg 中的默认值。
 func Error(c *gin.Context, code consts.BizCode, msg ...string) {
 	var message string
 	if len(msg) > 0 {

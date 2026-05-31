@@ -1,13 +1,14 @@
 services:
-  mysql:
-    image: mysql:8.4
+  postgres:
+    image: postgres:17.9
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: mydb
+      POSTGRES_USER: auth_service
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: mydb
     ports:
-      - "3306:3306"
+      - "5432:5432"
     volumes:
-      - mysql-data:/var/lib/mysql
+      - postgres-data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d:ro
 
   redis:
@@ -18,12 +19,12 @@ services:
   api:
     build: .
     depends_on:
-      - mysql
+      - postgres
       - redis
     environment:
       APP_ENV: development
       HTTP_ADDR: :8800
-      DATABASE_DSN: root:root@tcp(mysql:3306)/mydb?charset=utf8mb4&parseTime=True&loc=Local
+      DATABASE_DSN: postgres://auth_service:root@postgres:5432/mydb?sslmode=disable
       REDIS_ADDR: redis:6379
       JWT_SECRET: change-me-to-a-long-random-secret
       PASSWORD_CRYPTO_KEY: change-me-for-password-compat-encryption
@@ -33,5 +34,4 @@ services:
       - "8800:8800"
 
 volumes:
-  mysql-data:
-
+  postgres-data:

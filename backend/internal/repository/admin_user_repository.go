@@ -1,0 +1,331 @@
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+
+	"auth-service/internal/model"
+)
+
+// AdminUserRepository 封装 admin_users 表的所有数据库操作
+type AdminUserRepository struct {
+	db *sql.DB
+}
+
+// NewAdminUserRepository 构造 AdminUserRepository
+func NewAdminUserRepository(db *sql.DB) *AdminUserRepository {
+	return &AdminUserRepository{db: db}
+}
+
+// Create 将用户记录写入数据库
+func (r *AdminUserRepository) Create(ctx context.Context, user model.AdminUser) error {
+	query := `
+		INSERT INTO admin_users (uid, username, email, phone, password, two_fa_enabled, status, avatar, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`
+	_, err := r.db.ExecContext(
+		ctx,
+		query,
+		user.UID,
+		user.Username,
+		user.Email,
+		user.Phone,
+		user.Password,
+		user.TwoFAEnabled,
+		user.Status,
+		user.Avatar,
+	)
+	if err != nil {
+		return fmt.Errorf("insert user: %w", err)
+	}
+	return nil
+}
+
+// CountByUsername 统计指定用户名的用户数量，用于判断用户名是否已被占用
+func (r *AdminUserRepository) CountByUsername(ctx context.Context, username string) (int, error) {
+	var count int
+	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM admin_users WHERE username=$1", username).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count by username: %w", err)
+	}
+	return count, nil
+}
+
+// GetAll 返回所有用户，按 id 降序排列
+func (r *AdminUserRepository) GetAll(ctx context.Context) ([]model.AdminUser, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, uid, username, email, phone, password, two_fa_enabled, two_fa_secret, status, avatar, created_at, updated_at
+		FROM admin_users
+		ORDER BY id DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []model.AdminUser
+	for rows.Next() {
+		var u model.AdminUser
+		if err := scanAdminUser(rows, &u); err != nil {
+			return nil, fmt.Errorf("scan user: %w", err)
+		}
+		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate users: %w", err)
+	}
+
+	return users, nil
+}
+
+// GetByUsername 按用户名查询用户，用户不存在时返回 nil, nil
+func (r *AdminUserRepository) GetByUsername(ctx context.Context, username string) (*model.AdminUser, error) {
+	query := `
+		SELECT id, uid, username, email, phone, password, two_fa_enabled, two_fa_secret, status, avatar, created_at, updated_at
+		FROM admin_users
+		WHERE username = $1
+		LIMIT 1
+	`
+	var u model.AdminUser
+	if err := scanAdminUser(r.db.QueryRowContext(ctx, query, username), &u); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get by username: %w", err)
+	}
+	return &u, nil
+}
+
+// GetByUID 按 UID 查询用户，用户不存在时返回 nil, nil
+func (r *AdminUserRepository) GetByUID(ctx context.Context, uid string) (*model.AdminUser, error) {
+	query := `
+		SELECT id, uid, username, email, phone, password, two_fa_enabled, two_fa_secret, status, avatar, created_at, updated_at
+		FROM admin_users
+		WHERE uid = $1
+		LIMIT 1
+	`
+	var u model.AdminUser
+	if err := scanAdminUser(r.db.QueryRowContext(ctx, query, uid), &u); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get by uid: %w", err)
+	}
+	return &u, nil
+}
+
+// GetByID 按 ID 查询用户，用户不存在时返回 nil, nil
+func (r *AdminUserRepository) GetByID(ctx context.Context, id int64) (*model.AdminUser, error) {
+	query := `
+		SELECT id, uid, username, email, phone, password, two_fa_enabled, two_fa_secret, status, avatar, created_at, updated_at
+		FROM admin_users
+		WHERE id = $1
+		LIMIT 1
+	`
+	var u model.AdminUser
+	if err := scanAdminUser(r.db.QueryRowContext(ctx, query, id), &u); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get by id: %w", err)
+	}
+	return &u, nil
+}
+
+// AdminUserFilter 管理员用户分页查询过滤条件
+type AdminUserFilter struct {
+	Account  string
+	RealName string
+	Page     int
+	PageSize int
+}
+
+// AdminUserRow 管理员用户列表行（含角色信息）
+type AdminUserRow struct {
+	model.AdminUser
+	RoleID   string
+	RoleName string
+	RealName string
+}
+
+// ListPage 分页查询管理员用户，含角色信息
+func (r *AdminUserRepository) ListPage(ctx context.Context, f AdminUserFilter) ([]AdminUserRow, int64, error) {
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PageSize < 1 {
+		f.PageSize = 20
+	}
+
+	var (
+		conditions []string
+		args       []any
+		idx        = 1
+	)
+
+	if f.Account != "" {
+		conditions = append(conditions, fmt.Sprintf("u.username ILIKE $%d", idx))
+		args = append(args, "%"+f.Account+"%")
+		idx++
+	}
+
+	where := ""
+	if len(conditions) > 0 {
+		where = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	var total int64
+	countArgs := make([]any, len(args))
+	copy(countArgs, args)
+	if err := r.db.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT COUNT(*) FROM admin_users u %s
+	`, where), countArgs...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count admin users: %w", err)
+	}
+
+	offset := (f.Page - 1) * f.PageSize
+	query := fmt.Sprintf(`
+		SELECT u.id, u.uid, u.username, u.email, u.phone, u.password,
+		       u.two_fa_enabled, u.two_fa_secret, u.status, u.avatar, u.created_at, u.updated_at,
+		       COALESCE(r.id::text, '') AS role_id,
+		       COALESCE(r.title, '') AS role_name
+		FROM admin_users u
+		LEFT JOIN admin_user_roles aur ON aur.admin_user_id = u.id
+		LEFT JOIN roles r ON r.id = aur.role_id
+		%s
+		ORDER BY u.id DESC
+		LIMIT $%d OFFSET $%d
+	`, where, idx, idx+1)
+	args = append(args, f.PageSize, offset)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query admin users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []AdminUserRow
+	for rows.Next() {
+		var row AdminUserRow
+		if err := rows.Scan(
+			&row.ID, &row.UID, &row.Username, &row.Email, &row.Phone, &row.Password,
+			&row.TwoFAEnabled, &row.TwoFASecret, &row.Status, &row.Avatar, &row.CreatedAt, &row.UpdatedAt,
+			&row.RoleID, &row.RoleName,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scan admin user row: %w", err)
+		}
+		users = append(users, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate admin users: %w", err)
+	}
+	return users, total, nil
+}
+
+// Update 更新管理员用户基本信息
+func (r *AdminUserRepository) Update(ctx context.Context, user model.AdminUser) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE admin_users
+		SET username=$1, email=$2, phone=$3, status=$4, avatar=$5, updated_at=CURRENT_TIMESTAMP
+		WHERE id=$6
+	`, user.Username, user.Email, user.Phone, user.Status, user.Avatar, user.ID)
+	if err != nil {
+		return fmt.Errorf("update admin user: %w", err)
+	}
+	return nil
+}
+
+// UpdatePassword 更新管理员密码
+func (r *AdminUserRepository) UpdatePassword(ctx context.Context, id int64, hashedPassword string) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE admin_users SET password=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2",
+		hashedPassword, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+	return nil
+}
+
+// ResetTwoFA 重置用户的 2FA 状态（清空密钥并禁用）
+func (r *AdminUserRepository) ResetTwoFA(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE admin_users SET two_fa_secret=NULL, two_fa_enabled=FALSE, updated_at=CURRENT_TIMESTAMP WHERE id=$1",
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("reset 2fa: %w", err)
+	}
+	return nil
+}
+
+// SetRole 为管理员绑定角色（先删后插，一个管理员一个角色）
+func (r *AdminUserRepository) SetRole(ctx context.Context, adminUserID int64, roleID int64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, "DELETE FROM admin_user_roles WHERE admin_user_id=$1", adminUserID); err != nil {
+		return fmt.Errorf("delete user roles: %w", err)
+	}
+	if roleID > 0 {
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO admin_user_roles (admin_user_id, role_id) VALUES ($1, $2)", adminUserID, roleID,
+		); err != nil {
+			return fmt.Errorf("insert user role: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// UpdateTwoFASecret 保存用户的 TOTP 密钥，并将 two_fa_enabled 重置为 false（绑定尚未完成）
+func (r *AdminUserRepository) UpdateTwoFASecret(ctx context.Context, userID int64, secret string) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE admin_users SET two_fa_secret=$1, two_fa_enabled=FALSE, updated_at=CURRENT_TIMESTAMP WHERE id=$2",
+		secret, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("update 2fa secret: %w", err)
+	}
+	return nil
+}
+
+// EnableTwoFA 将用户的 two_fa_enabled 标志置为 true，完成 2FA 绑定
+func (r *AdminUserRepository) EnableTwoFA(ctx context.Context, userID int64) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE admin_users SET two_fa_enabled=TRUE, updated_at=CURRENT_TIMESTAMP WHERE id=$1",
+		userID,
+	)
+	if err != nil {
+		return fmt.Errorf("enable 2fa: %w", err)
+	}
+	return nil
+}
+
+// userScanner 抽象 sql.Row 和 sql.Rows 的公共 Scan 接口，便于复用 scanAdminUser
+type userScanner interface {
+	Scan(dest ...any) error
+}
+
+// scanAdminUser 将一行数据库结果扫描到 AdminUser 结构体
+func scanAdminUser(scanner userScanner, u *model.AdminUser) error {
+	return scanner.Scan(
+		&u.ID,
+		&u.UID,
+		&u.Username,
+		&u.Email,
+		&u.Phone,
+		&u.Password,
+		&u.TwoFAEnabled,
+		&u.TwoFASecret,
+		&u.Status,
+		&u.Avatar,
+		&u.CreatedAt,
+		&u.UpdatedAt,
+	)
+}

@@ -6,7 +6,7 @@ func TestLoadUsesEnvironment(t *testing.T) {
 	t.Setenv("APP_NAME", "Custom API")
 	t.Setenv("HTTP_ADDR", ":9999")
 	t.Setenv("CORS_ORIGINS", "http://a.test,http://b.test")
-	t.Setenv("DATABASE_DSN", "user:pass@tcp(127.0.0.1:3306)/auth_service")
+	t.Setenv("DATABASE_DSN", "postgres://user:pass@127.0.0.1:5432/auth_service?sslmode=disable")
 	t.Setenv("REDIS_DB", "2")
 	t.Setenv("JWT_EXPIRE", "2h")
 
@@ -34,7 +34,7 @@ func TestLoadUsesEnvironment(t *testing.T) {
 
 func TestLoadRequiresSecretsInProduction(t *testing.T) {
 	t.Setenv("APP_ENV", "production")
-	t.Setenv("DATABASE_DSN", "user:pass@tcp(127.0.0.1:3306)/auth_service")
+	t.Setenv("DATABASE_DSN", "postgres://user:pass@127.0.0.1:5432/auth_service?sslmode=disable")
 
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() error = nil, want production secret error")

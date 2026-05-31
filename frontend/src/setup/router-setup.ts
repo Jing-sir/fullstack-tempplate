@@ -89,13 +89,21 @@ const routerGuards: Record<string, RouterGuardHandler> = {
         if (!hasFetchedRoleMenu.value) return '/error'
 
         const permissionMenus = roleMenu.value as PermissionMenuItem[]
-        const permissionMap = Object.fromEntries(
-            permissionMenus
-                .filter((item) => item.component)
-                .map((item) => [String(item.component), String(item.component)]),
-        )
 
-        const routeRole = typeof to.meta.role === 'string' ? to.meta.role : ''
+        // 菜单是树结构，需要递归把所有层级的 component 收集为权限 key
+        const collectPermissions = (items: PermissionMenuItem[]): Record<string, string> => {
+            const result: Record<string, string> = {}
+            for (const item of items) {
+                const key = String(item.component || item.name || '')
+                if (key) result[key] = key
+                const children = (item as unknown as { children?: PermissionMenuItem[] }).children
+                if (children?.length) Object.assign(result, collectPermissions(children))
+            }
+            return result
+        }
+        const permissionMap = collectPermissions(permissionMenus)
+
+        const routeRole = typeof to.name === 'string' ? to.name : ''
         if (!routeRole) return '/error'
         if (!permissionMap[routeRole]) return buildNoPermissionPath(to, routeRole)
 

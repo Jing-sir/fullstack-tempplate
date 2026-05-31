@@ -1,14 +1,18 @@
 package middleware
 
 import (
+	"strings"
+
 	"auth-service/internal/config"
 	"auth-service/internal/consts"
 	"auth-service/internal/response"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
+// AuthMiddleware 返回 JWT 鉴权中间件。
+// 从 Authorization 请求头解析 Bearer Token，验证通过后将 uid 和 username 写入 gin.Context，
+// 供后续 Handler 通过 c.GetString("uid") 等方式读取。
 func AuthMiddleware(jwtManager *config.JWTManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
@@ -18,6 +22,7 @@ func AuthMiddleware(jwtManager *config.JWTManager) gin.HandlerFunc {
 			return
 		}
 
+		// 格式必须为 "Bearer <token>"
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
 			response.Error(c, consts.Unauthorized, "无效的 Authorization 格式")
@@ -32,6 +37,7 @@ func AuthMiddleware(jwtManager *config.JWTManager) gin.HandlerFunc {
 			return
 		}
 
+		// 将身份信息写入上下文，后续 Handler 直接读取，无需重复解析 token
 		c.Set("uid", claims.UID)
 		c.Set("username", claims.Username)
 		c.Next()

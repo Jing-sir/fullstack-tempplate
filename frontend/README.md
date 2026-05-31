@@ -285,6 +285,7 @@ pnpm exec eslint src/path/to/file.ts src/path/to/file.vue
 
 - 请求头注入
     - `Token`
+    - `Authorization: Bearer <token>`
     - `Accept-Language`
     - `DateTime`
     - trace/span id
@@ -297,16 +298,18 @@ pnpm exec eslint src/path/to/file.ts src/path/to/file.vue
 ### 8.2 `src/api/api.ts`
 
 普通 API 模块默认继承 `Api` 基类，通过 `VITE_APP_BASE_URL` 创建 Axios 实例。
+`VITE_APP_BASE_URL` 必须是固定版本前缀，例如 `/api/v1` 或后续 `/api/v2`。
 
 ### 8.3 API 模块现状
 
-- `src/api/sys.ts`
+- `src/api/sys/auth.ts`
     - 登录
     - 用户信息
-    - 菜单
     - 退出登录
     - 2FA 相关接口
     - 密钥 `pwdIv`
+- `src/api/sys/role.ts`
+    - 菜单
 - `src/api/permission.ts`
     - 权限列表
     - 权限勾选
@@ -324,6 +327,8 @@ pnpm exec eslint src/path/to/file.ts src/path/to/file.vue
 - 组件和页面里不要直接写 `axios`
 - 后端接口统一放到 `src/api`
 - 一般接口优先继承 `src/api/api.ts`
+- 后端 URL 标准固定为 `/api/v{数字}/资源`，例如登录接口固定为 `POST /api/v1/login`
+- 前端 API 方法内部只写版本前缀后的路径，例如 `'/login'`；版本前缀只能由 `VITE_APP_BASE_URL=/api/v1` 统一提供
 
 ## 9. 状态管理
 

@@ -25,13 +25,16 @@ export async function decryptAESGCM(encryptedKeyBase64: string, keyStr: string, 
     }
 }
 
-export async function encryptAESGCM(plainText: string, keyStr: string, ivStr: string): Promise<string> {
-    // 将字符串密钥和 IV 转换为 Uint8Array
-    const keyBytes = Uint8Array.from([...keyStr].map((c) => c.charCodeAt(0)));
-    const ivBytes = Uint8Array.from([...ivStr].map((c) => c.charCodeAt(0)));
+export async function encryptAESGCM(plainText: string, keyStr: string, ivHex: string): Promise<string> {
+    // 与后端对齐：key = SHA-256(keyStr)，IV = hex.decode(ivHex)
+    const rawKey = new TextEncoder().encode(keyStr);
+    const keyHash = await crypto.subtle.digest('SHA-256', rawKey);
+    const ivBytes = Uint8Array.from(
+        ivHex.match(/.{1,2}/g)!.map((byte) => parseInt(byte, 16)),
+    );
 
     // 导入 AES-GCM 密钥
-    const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt']);
+    const key = await crypto.subtle.importKey('raw', keyHash, { name: 'AES-GCM' }, false, ['encrypt']);
 
     // 将明文转换为 Uint8Array
     const encoder = new TextEncoder();
@@ -48,7 +51,7 @@ export async function encryptAESGCM(plainText: string, keyStr: string, ivStr: st
             plainTextBytes,
         );
 
-        // 将加密后的 ArrayBuffer 转换为 Base64 编码的字符串
+        // Base64 编码，与后端 base64.StdEncoding 对齐
         return btoa(String.fromCharCode(...new Uint8Array(encrypted)));
     } catch (err) {
         console.error(formatText('加密失败'), err);

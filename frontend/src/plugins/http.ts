@@ -88,9 +88,18 @@ function httpInit(instance: AxiosInstance): AxiosInstance {
             const now = Date.now()
             const traceId = createTraceId()
             const language = getI18nLanguage()
+            const manageToken = getManageToken()
+            const authHeaders = manageToken
+                ? {
+                      Token: manageToken,
+                      Authorization: `Bearer ${manageToken}`,
+                  }
+                : {
+                      Token: '',
+                  }
             const requestHeaders = {
                 pretreatment: true, // 是否进行数据预处理，不进行预处理将返回原始的数据结构到集成层（适用于获取完整的数据结构，而非仅获取需要的数据）
-                Token: getManageToken(),
+                ...authHeaders,
                 'X-B3-Traceid': traceId, // Traceid
                 'X-B3-Spanid': traceId.slice(0, 16), // Spanid
                 'Accept-Language': language, // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Language

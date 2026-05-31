@@ -5,7 +5,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN go build -o /out/auth-service ./cmd
+RUN go build -o /out/auth-service ./cmd/server
 
 FROM alpine:3.22
 
@@ -14,4 +14,3 @@ COPY --from=build /out/auth-service /app/auth-service
 
 EXPOSE 8800
 ENTRYPOINT ["/app/auth-service"]
-

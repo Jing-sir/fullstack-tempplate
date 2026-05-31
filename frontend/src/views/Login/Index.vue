@@ -3,12 +3,10 @@ import type { FormInstance } from '@arco-design/web-vue'
 import Settings2FA from '@/components/Settings2FA.vue'
 import GoogleCode from '@/components/GoogleCode.vue'
 import { Message } from '@arco-design/web-vue'
-import { encryptAESGCM } from '@/utils/aesGcm'
 import logoUrl from '@/assets/images/logo.png'
 import { useRequest } from 'vue-request'
 import sysAuthApi from '@/api/sys/auth'
 import { setManageToken } from '@/utils/session'
-import md5 from 'md5'
 
 const { t } = useI18n()
 
@@ -36,22 +34,10 @@ const rules = {
 }
 
 const { loading, runAsync } = useRequest(
-    async (facode = '') => {
-        const { account, password: plainPassword } = formState
-        const password = await encryptAESGCM(
-            plainPassword,
-            md5(`${account}sys-api`),
-            userStore.pwdIv,
-        )
-        return sysAuthApi.sysUserLogin({ account, password, facode })
+    async (twoFACode = '') => {
+        const { account, password } = formState
+        return sysAuthApi.sysUserLogin({ account, password, twoFACode })
     },
-    {
-        manual: true,
-    },
-)
-
-const { loading: googleLoading, runAsync: validateGoogle } = useRequest(
-    (googleCode: string) => sysAuthApi.validateGoogle({ googleCode }),
     {
         manual: true,
     },
@@ -85,13 +71,15 @@ const onSuccess2FA = async (): Promise<void> => {
     await finishLogin()
 }
 
-const onOk = async (): Promise<void> => {
-    const errors = await formRef.value?.validate()
-    if (errors) return
-
-    const loginData = await runAsync()
-
-    setManageToken(loginData.token)
+const handleLoginResult = async (
+    loginData: PromiseReturnType<typeof sysAuthApi.sysUserLogin>,
+): Promise<void> => {
+    if (loginData.token) {
+        setManageToken(loginData.token)
+    }
+    if (loginData.user) {
+        userStore.setUserInfo(loginData.user)
+    }
 
     if (loginData.googleState === 2) {
         is2FAModalOpen.value = true
@@ -106,10 +94,18 @@ const onOk = async (): Promise<void> => {
     await finishLogin()
 }
 
+const onOk = async (): Promise<void> => {
+    const errors = await formRef.value?.validate()
+    if (errors) return
+
+    const loginData = await runAsync()
+    await handleLoginResult(loginData)
+}
+
 const getCode = async (val: string): Promise<void> => {
-    await validateGoogle(val)
+    const loginData = await runAsync(val)
     codeRef.value?.closeDialog()
-    await finishLogin()
+    await handleLoginResult(loginData)
 }
 
 const onCancelGoogleCode = (): void => {
@@ -135,7 +131,7 @@ const onCancelGoogleCode = (): void => {
 
                         <GoogleCode
                             ref="codeRef"
-                            :loading="googleLoading"
+                            :loading="loading"
                             @setCode="getCode"
                             @cancel="onCancelGoogleCode"
                         />

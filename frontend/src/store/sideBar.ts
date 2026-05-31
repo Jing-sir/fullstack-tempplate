@@ -24,26 +24,34 @@ export default defineStore('sideBar', () => {
         fetchRoleObj: Record<string, string>,
     ): RouteRecordRaw[] =>
         routeList.filter((routeItem) => {
-            const role = routeItem.meta?.role
+            const routeName = typeof routeItem.name === 'string' ? routeItem.name : ''
             const ignorePermission = Boolean(routeItem.meta?.ignorePermission)
 
             if (routeItem.children?.length) {
                 routeItem.children = getAsyRouter(routeItem.children, fetchRoleObj)
             }
 
-            // 允许 route.meta.ignorePermission 的路由跳过后端权限菜单校验；
-            // 同时如果子路由中存在可访问节点，也保留父级菜单分组。
             const hasAccessibleChildren = Boolean(routeItem.children?.length)
             return Boolean(
-                ignorePermission || (role && fetchRoleObj[role]) || hasAccessibleChildren,
+                ignorePermission || (routeName && fetchRoleObj[routeName]) || hasAccessibleChildren,
             )
         })
 
     // 遍历后台传来的路由字符串，转换为组件对象
     const filterAsyRouter = (roleList: MenuItem[]): RouteRecordRaw[] => {
-        const fetchRoleObj = Object.fromEntries(
-            roleList.map((item) => [item.component, item.component]),
-        )
+        // 菜单是树结构，需要递归把所有层级的 component 铺平成 key-value 对象
+        const collectComponents = (items: MenuItem[]): Record<string, string> => {
+            const result: Record<string, string> = {}
+            for (const item of items) {
+                const key = item.component || item.name
+                if (key) result[key] = key
+                if (item.children?.length) {
+                    Object.assign(result, collectComponents(item.children as MenuItem[]))
+                }
+            }
+            return result
+        }
+        const fetchRoleObj = collectComponents(roleList)
         return getAsyRouter(JSON.parse(JSON.stringify(permissionRoutes)), fetchRoleObj)
     }
 

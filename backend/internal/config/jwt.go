@@ -2,22 +2,26 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// JWTClaims 是 JWT Payload 的自定义声明，包含用户标识信息
 type JWTClaims struct {
 	UID      string `json:"uid"`
 	Username string `json:"username"`
 	jwt.RegisteredClaims
 }
 
+// JWTManager 负责 JWT 的签发与解析
 type JWTManager struct {
-	secret []byte
-	expire time.Duration
+	secret []byte        // HMAC-SHA256 签名密钥
+	expire time.Duration // token 有效期
 }
 
+// NewJWTManager 构造 JWTManager
 func NewJWTManager(secret string, expire time.Duration) *JWTManager {
 	return &JWTManager{
 		secret: []byte(secret),
@@ -25,6 +29,7 @@ func NewJWTManager(secret string, expire time.Duration) *JWTManager {
 	}
 }
 
+// GenerateToken 为指定用户签发 JWT，有效期由配置决定
 func (m *JWTManager) GenerateToken(uid, username string) (string, error) {
 	now := time.Now()
 	claims := JWTClaims{
@@ -37,22 +42,28 @@ func (m *JWTManager) GenerateToken(uid, username string) (string, error) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(m.secret)
+	signed, err := token.SignedString(m.secret)
+	if err != nil {
+		return "", fmt.Errorf("sign token: %w", err)
+	}
+	return signed, nil
 }
 
+// ParseToken 解析并验证 JWT，返回声明信息；token 无效或已过期时返回 error
 func (m *JWTManager) ParseToken(tokenString string) (*JWTClaims, error) {
 	claims := &JWTClaims{}
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-		if token.Method != jwt.SigningMethodHS256 {
-			return nil, errors.New("unexpected signing method")
-		}
+	parser := jwt.NewParser(
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithExpirationRequired(),
+	)
+	token, err := parser.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		return m.secret, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse token: %w", err)
 	}
 	if !token.Valid {
-		return nil, errors.New("invalid token")
+		return nil, errors.New("token 无效")
 	}
 	return claims, nil
 }
