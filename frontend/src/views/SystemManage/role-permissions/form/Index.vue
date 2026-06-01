@@ -244,7 +244,16 @@ const fetchRoleList = async (): Promise<void> => {
     isSpinning.value = true;
 
     try {
-        allRoleList.value = await sysRoleApi.sysRoleMenuList();
+        const rawList = await sysRoleApi.sysRoleMenuList();
+        // 后端 title 字段存储的是路由 name（i18n key），用 t() 翻译成当前语言的显示名称。
+        // 若 i18n 无对应 key，t() 会原样返回 key 本身作为 fallback。
+        const translateName = (nodes: typeof rawList): typeof rawList =>
+            nodes.map((node) => ({
+                ...node,
+                menuName: t(node.menuName),
+                children: node.children ? translateName(node.children) : undefined,
+            }));
+        allRoleList.value = translateName(rawList);
     } finally {
         NProgress.done();
         isSpinning.value = false;
