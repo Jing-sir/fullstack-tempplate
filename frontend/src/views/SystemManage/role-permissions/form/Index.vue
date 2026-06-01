@@ -14,6 +14,7 @@ interface PermissionSummaryItem {
     moduleKey: string;
     moduleTitle: string;
     path: string[];
+    type?: number;
 }
 
 const { t } = useI18n();
@@ -69,7 +70,15 @@ const currentModule = computed(() =>
     rootRoleList.value.find((item) => String(item.menuId) === currentModuleKey.value) ?? null,
 );
 
-// 将整棵权限树拍平成“可搜索、可分组、可回跳”的索引。
+// 递归收集节点下所有 type=3 后代的 menuId key。
+// 用于 type=2 勾选/取消勾选时自动联动其隐藏路由页子节点。
+const collectHiddenDescendants = (nodes: TreeDataType[]): string[] =>
+    nodes.flatMap((node) => {
+        const descendants = collectHiddenDescendants(node.children ?? []);
+        return node.type === 3 ? [String(node.menuId), ...descendants] : descendants;
+    });
+
+// 将整棵权限树拍平成”可搜索、可分组、可回跳”的索引。
 // 右侧已选权限清单不会再直接遍历树，而是基于这个索引做筛选和聚合。
 const flattenPermissionTree = (
     nodes: TreeDataType[],
@@ -86,6 +95,7 @@ const flattenPermissionTree = (
             moduleKey,
             moduleTitle,
             path,
+            type: node.type,
         };
 
         return [
@@ -100,9 +110,12 @@ const permissionSummary = computed(() =>
     ),
 );
 
-// 右侧清单和顶部统计都建立在“已选索引”上，避免直接操作树节点。
+// 右侧清单和顶部统计都建立在”已选索引”上，避免直接操作树节点。
+// type=3 隐藏路由页不在清单中展示（对管理员无业务语义，由 type=2 联动控制）。
 const selectedPermissionList = computed(() =>
-    permissionSummary.value.filter((item) => checkedKeySet.value.has(item.key)),
+    permissionSummary.value.filter(
+        (item) => checkedKeySet.value.has(item.key) && item.type !== 3,
+    ),
 );
 
 // 左侧模块角标直接复用已选索引聚合结果。
@@ -172,8 +185,9 @@ const readonlyTreeData = computed<TreeDataType[]>(() => {
     const markReadonly = (nodes: TreeDataType[]): TreeDataType[] =>
         nodes.map((node) => ({
             ...node,
-            // 查看模式下保留树的浏览能力，但锁定 checkbox 交互。
-            disableCheckbox: see.value,
+            // type=3 隐藏路由页始终禁用 checkbox（跟随父级 type=2 联动，不可单独操作）；
+            // 查看模式下所有节点也锁定交互。
+            disableCheckbox: node.type === 3 || see.value,
             children: markReadonly(node.children ?? []),
         }));
 
@@ -286,6 +300,60 @@ const handleSaveData = async (): Promise<void> => {
             isSpinning.value = false;
         });
 };
+
+// type=2 菜单页勾选/取消勾选时，自动联动其下所有 type=3 隐藏路由页子节点。
+// 使用独立的 isLinkingHidden flag 避免联动赋值触发 watch 循环。
+const isLinkingHidden = ref(false);
+watch(
+    () => [...currState.checkedKeys],
+    (newKeys, oldKeys) => {
+        if (isLinkingHidden.value) return;
+
+        const newSet = new Set(newKeys);
+        const oldSet = new Set(oldKeys);
+
+        // 找出本次新增和移除的 key
+        const added = newKeys.filter((k) => !oldSet.has(k));
+        const removed = (oldKeys ?? []).filter((k) => !newSet.has(k));
+
+        // 在完整权限树（allRoleList）中找对应节点
+        const findNode = (nodes: TreeDataType[], key: string): TreeDataType | null => {
+            for (const node of nodes) {
+                if (String(node.menuId) === key) return node;
+                const found = findNode(node.children ?? [], key);
+                if (found) return found;
+            }
+            return null;
+        };
+
+        const toAdd: string[] = [];
+        const toRemove: string[] = [];
+
+        for (const key of added) {
+            const node = findNode(allRoleList.value, key);
+            if (node?.type === 2) {
+                toAdd.push(...collectHiddenDescendants(node.children ?? []));
+            }
+        }
+        for (const key of removed) {
+            const node = findNode(allRoleList.value, key);
+            if (node?.type === 2) {
+                toRemove.push(...collectHiddenDescendants(node.children ?? []));
+            }
+        }
+
+        if (!toAdd.length && !toRemove.length) return;
+
+        isLinkingHidden.value = true;
+        const merged = [...new Set([...newKeys, ...toAdd])].filter(
+            (k) => !toRemove.includes(k),
+        );
+        currState.checkedKeys = merged;
+        nextTick(() => {
+            isLinkingHidden.value = false;
+        });
+    },
+);
 
 // 模块列表一旦准备好，默认自动聚焦第一个模块，保证中间树面板始终有内容。
 watch(

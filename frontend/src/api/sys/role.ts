@@ -64,6 +64,7 @@ class SysRoleApi extends Api {
             menuId: String(item.id ?? ''),
             menuName: String(item.title ?? item.name ?? ''),
             parentId: String(item.parent_id ?? '0'),
+            type: typeof item.type === 'number' ? item.type : Number(item.type ?? 0),
             children: Array.isArray(item.children)
                 ? (item.children as Array<Record<string, unknown>>).map(normalize)
                 : undefined,

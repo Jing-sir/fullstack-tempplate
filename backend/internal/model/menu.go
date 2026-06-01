@@ -6,8 +6,10 @@ import "time"
 type MenuType int
 
 const (
-	MenuTypeMenu   MenuType = 1 // 菜单（对应前端路由）
-	MenuTypeButton MenuType = 2 // 按钮（格式：routeName-actionName，如 userList-add）
+	MenuTypeDir    MenuType = 1 // 目录：纯分组，无路由，进侧边栏但不可点击（如"系统管理"）
+	MenuTypePage   MenuType = 2 // 菜单页：叶子菜单，有路由，进侧边栏可点击，name = 前端路由 name
+	MenuTypeHidden MenuType = 3 // 隐藏路由页：有路由，meta.isShow:true，不进侧边栏，跟随父级 type=2 权限
+	MenuTypeButton MenuType = 4 // 按钮：页面内按钮级权限，无路由，name 格式为 routeName-action
 )
 
 // Menu 对应 menus 表，同时存储菜单项和按钮权限

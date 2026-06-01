@@ -10,8 +10,11 @@ import (
 
 // 菜单管理业务错误
 var (
-	ErrMenuNotFound  = errors.New("菜单不存在")
-	ErrMenuNameTaken = errors.New("菜单权限 key 已存在")
+	ErrMenuNotFound        = errors.New("菜单不存在")
+	ErrMenuNameTaken       = errors.New("菜单权限 key 已存在")
+	ErrMenuTypeInvalid     = errors.New("菜单类型无效，合法值为 1=目录 2=菜单页 3=隐藏路由页 4=按钮")
+	ErrMenuHiddenNeedPage  = errors.New("隐藏路由页（type=3）必须挂在菜单页（type=2）节点下")
+	ErrMenuButtonNeedParent = errors.New("按钮权限（type=4）必须挂在菜单节点下，不能为顶级")
 )
 
 // CreateMenuInput 新增菜单/按钮的请求参数
@@ -57,6 +60,27 @@ func (s *MenuService) ListTree(ctx context.Context) ([]*model.MenuTree, error) {
 
 // Create 新增菜单或按钮
 func (s *MenuService) Create(ctx context.Context, input CreateMenuInput) (int64, error) {
+	// 校验 type 合法范围
+	if input.Type < model.MenuTypeDir || input.Type > model.MenuTypeButton {
+		return 0, ErrMenuTypeInvalid
+	}
+	// type=3 隐藏路由页：必须有父节点且父节点为 type=2 菜单页
+	if input.Type == model.MenuTypeHidden {
+		if input.ParentID == 0 {
+			return 0, ErrMenuHiddenNeedPage
+		}
+		parent, err := s.menus.GetByID(ctx, input.ParentID)
+		if err != nil {
+			return 0, fmt.Errorf("get parent menu: %w", err)
+		}
+		if parent == nil || parent.Type != model.MenuTypePage {
+			return 0, ErrMenuHiddenNeedPage
+		}
+	}
+	// type=4 按钮：必须有父节点
+	if input.Type == model.MenuTypeButton && input.ParentID == 0 {
+		return 0, ErrMenuButtonNeedParent
+	}
 	// 设置默认状态
 	status := input.Status
 	if status == 0 {

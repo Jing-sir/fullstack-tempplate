@@ -105,9 +105,25 @@ const routerGuards: Record<string, RouterGuardHandler> = {
 
         const routeRole = typeof to.name === 'string' ? to.name : ''
         if (!routeRole) return '/error'
-        if (!permissionMap[routeRole]) return buildNoPermissionPath(to, routeRole)
+        if (permissionMap[routeRole]) return true
 
-        return true
+        // isShow:true 的隐藏路由页（type=3）安全网：
+        // 若该路由未在菜单表入库，向上找第一个有权限的非 isShow 父级放行。
+        // 正常情况下 type=3 数据已入库，permissionMap 直接命中；此处仅作开发期降级兜底。
+        if (to.meta.isShow) {
+            const parentMatched = [...to.matched]
+                .reverse()
+                .find((r) => !r.meta?.isShow && permissionMap[String(r.name ?? '')])
+            if (parentMatched) {
+                console.warn(
+                    `[router] isShow 路由 "${routeRole}" 未在菜单表中注册（type=3），` +
+                    `已 fallback 到父级 "${String(parentMatched.name)}" 权限放行。请检查迁移 SQL 是否执行。`,
+                )
+                return true
+            }
+        }
+
+        return buildNoPermissionPath(to, routeRole)
     },
 
     async setRedirect(to, from): Promise<GuardResult> {

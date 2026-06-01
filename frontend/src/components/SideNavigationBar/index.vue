@@ -432,6 +432,23 @@ watch(
         color 0.2s ease;
 }
 
+/**
+ * 三级及以上菜单缩进：每嵌套一层额外增加 16px padding-left。
+ * Arco 的 arco-menu-inline 对应每一层展开的子菜单容器。
+ * 二级：.arco-menu-inline → 24px（Arco 默认）
+ * 三级：.arco-menu-inline .arco-menu-inline → 24 + 16 = 40px
+ * 四级：再嵌套一层 → 40 + 16 = 56px，以此类推
+ */
+:deep(.side-nav__menu .arco-menu-inline .arco-menu-inline .arco-menu-item),
+:deep(.side-nav__menu .arco-menu-inline .arco-menu-inline .arco-menu-inline-header) {
+    padding-left: 40px;
+}
+
+:deep(.side-nav__menu .arco-menu-inline .arco-menu-inline .arco-menu-inline .arco-menu-item),
+:deep(.side-nav__menu .arco-menu-inline .arco-menu-inline .arco-menu-inline .arco-menu-inline-header) {
+    padding-left: 56px;
+}
+
 :deep(.side-nav__menu .arco-menu-item:hover),
 :deep(.side-nav__menu .arco-menu-inline-header:hover) {
     color: #fff;

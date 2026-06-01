@@ -40,9 +40,11 @@ export default defineStore('sideBar', () => {
     // 遍历后台传来的路由字符串，转换为组件对象
     const filterAsyRouter = (roleList: MenuItem[]): RouteRecordRaw[] => {
         // 菜单是树结构，需要递归把所有层级的 component 铺平成 key-value 对象
+        // type=4（按钮，name 格式为 routeName-action）不对应路由，跳过，避免误混入路由过滤
         const collectComponents = (items: MenuItem[]): Record<string, string> => {
             const result: Record<string, string> = {}
             for (const item of items) {
+                if ((item as MenuItem & { type?: number }).type === 4) continue
                 const key = item.component || item.name
                 if (key) result[key] = key
                 if (item.children?.length) {
