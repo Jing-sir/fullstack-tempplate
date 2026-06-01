@@ -5,7 +5,6 @@ import { IconSearch } from '@arco-design/web-vue/es/icon';
 import NProgress from 'nprogress';
 import type { TreeNodeKey } from '@arco-design/web-vue/es/tree/interface';
 import type { TreeDataType } from '@/interface/SystemManageType';
-import { buildTree } from '@/utils/common';
 import sysRoleApi from '@/api/sys/role';
 
 interface PermissionSummaryItem {
@@ -52,11 +51,9 @@ const rules: Record<string, FieldRule[]> = {
 // 频繁判断“当前权限是否已选”时用 Set，避免在大权限树里反复线性查找。
 const checkedKeySet = computed(() => new Set(currState.checkedKeys.map((key) => String(key))));
 
-// 后端返回的是平铺菜单列表，这里先统一转成真正的树结构，
-// 后续模块导航、树展示、已选清单都从这棵树派生，保证数据源唯一。
-const rootRoleList = computed(() =>
-    buildTree<TreeDataType>(allRoleList.value, 'children', 'menuId', 'parentId') || [],
-);
+// 后端 /admin/menus 已返回嵌套树结构，normalize 时保留了 children，
+// 直接使用即可，无需再通过 buildTree 重建（buildTree 只处理平铺数组）。
+const rootRoleList = computed(() => allRoleList.value);
 
 // 左侧模块导航只关心一级模块，因此从根树提取最轻量的导航数据。
 const moduleList = computed(() =>
