@@ -134,5 +134,49 @@ func (s *RoleService) SetMenus(ctx context.Context, roleID int64, menuIDs []int6
 	if existing == nil {
 		return ErrRoleNotFound
 	}
-	return s.roles.SetMenus(ctx, roleID, menuIDs)
+	normalizedMenuIDs, err := s.normalizeMenuIDs(ctx, menuIDs)
+	if err != nil {
+		return err
+	}
+	return s.roles.SetMenus(ctx, roleID, normalizedMenuIDs)
+}
+
+func (s *RoleService) normalizeMenuIDs(ctx context.Context, menuIDs []int64) ([]int64, error) {
+	menus, err := s.menus.GetAll(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list menus: %w", err)
+	}
+
+	menuByID := make(map[int64]model.Menu, len(menus))
+	for _, menu := range menus {
+		menuByID[menu.ID] = menu
+	}
+
+	selected := make(map[int64]struct{}, len(menuIDs))
+	for _, id := range menuIDs {
+		if _, ok := menuByID[id]; !ok {
+			return nil, ErrMenuNotFound
+		}
+		lineage := make(map[int64]struct{})
+		for currentID := id; currentID != 0; {
+			if _, exists := lineage[currentID]; exists {
+				return nil, ErrMenuParentInvalid
+			}
+			lineage[currentID] = struct{}{}
+			current, ok := menuByID[currentID]
+			if !ok {
+				return nil, ErrMenuParentInvalid
+			}
+			selected[currentID] = struct{}{}
+			currentID = current.ParentID
+		}
+	}
+
+	result := make([]int64, 0, len(selected))
+	for _, menu := range menus {
+		if _, ok := selected[menu.ID]; ok {
+			result = append(result, menu.ID)
+		}
+	}
+	return result, nil
 }

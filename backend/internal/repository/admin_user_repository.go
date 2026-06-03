@@ -23,14 +23,15 @@ func NewAdminUserRepository(db *sql.DB) *AdminUserRepository {
 // Create 将用户记录写入数据库
 func (r *AdminUserRepository) Create(ctx context.Context, user model.AdminUser) error {
 	query := `
-		INSERT INTO admin_users (uid, username, email, phone, password, two_fa_enabled, status, avatar, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		INSERT INTO admin_users (uid, username, real_name, email, phone, password, two_fa_enabled, status, avatar, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	`
 	_, err := r.db.ExecContext(
 		ctx,
 		query,
 		user.UID,
 		user.Username,
+		user.RealName,
 		user.Email,
 		user.Phone,
 		user.Password,
@@ -57,7 +58,7 @@ func (r *AdminUserRepository) CountByUsername(ctx context.Context, username stri
 // GetAll 返回所有用户，按 id 降序排列
 func (r *AdminUserRepository) GetAll(ctx context.Context) ([]model.AdminUser, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, uid, username, email, phone, password, two_fa_enabled, two_fa_secret, status, avatar, created_at, updated_at
+		SELECT id, uid, username, real_name, email, phone, password, two_fa_enabled, two_fa_secret, status, token_version, permission_version, avatar, created_at, updated_at
 		FROM admin_users
 		ORDER BY id DESC
 	`)
@@ -84,7 +85,7 @@ func (r *AdminUserRepository) GetAll(ctx context.Context) ([]model.AdminUser, er
 // GetByUsername 按用户名查询用户，用户不存在时返回 nil, nil
 func (r *AdminUserRepository) GetByUsername(ctx context.Context, username string) (*model.AdminUser, error) {
 	query := `
-		SELECT id, uid, username, email, phone, password, two_fa_enabled, two_fa_secret, status, avatar, created_at, updated_at
+		SELECT id, uid, username, real_name, email, phone, password, two_fa_enabled, two_fa_secret, status, token_version, permission_version, avatar, created_at, updated_at
 		FROM admin_users
 		WHERE username = $1
 		LIMIT 1
@@ -102,7 +103,7 @@ func (r *AdminUserRepository) GetByUsername(ctx context.Context, username string
 // GetByUID 按 UID 查询用户，用户不存在时返回 nil, nil
 func (r *AdminUserRepository) GetByUID(ctx context.Context, uid string) (*model.AdminUser, error) {
 	query := `
-		SELECT id, uid, username, email, phone, password, two_fa_enabled, two_fa_secret, status, avatar, created_at, updated_at
+		SELECT id, uid, username, real_name, email, phone, password, two_fa_enabled, two_fa_secret, status, token_version, permission_version, avatar, created_at, updated_at
 		FROM admin_users
 		WHERE uid = $1
 		LIMIT 1
@@ -120,7 +121,7 @@ func (r *AdminUserRepository) GetByUID(ctx context.Context, uid string) (*model.
 // GetByID 按 ID 查询用户，用户不存在时返回 nil, nil
 func (r *AdminUserRepository) GetByID(ctx context.Context, id int64) (*model.AdminUser, error) {
 	query := `
-		SELECT id, uid, username, email, phone, password, two_fa_enabled, two_fa_secret, status, avatar, created_at, updated_at
+		SELECT id, uid, username, real_name, email, phone, password, two_fa_enabled, two_fa_secret, status, token_version, permission_version, avatar, created_at, updated_at
 		FROM admin_users
 		WHERE id = $1
 		LIMIT 1
@@ -137,6 +138,7 @@ func (r *AdminUserRepository) GetByID(ctx context.Context, id int64) (*model.Adm
 
 // AdminUserFilter 管理员用户分页查询过滤条件
 type AdminUserFilter struct {
+	UID      string
 	Account  string
 	RealName string
 	Page     int
@@ -148,7 +150,6 @@ type AdminUserRow struct {
 	model.AdminUser
 	RoleID   string
 	RoleName string
-	RealName string
 }
 
 // ListPage 分页查询管理员用户，含角色信息
@@ -166,9 +167,19 @@ func (r *AdminUserRepository) ListPage(ctx context.Context, f AdminUserFilter) (
 		idx        = 1
 	)
 
+	if f.UID != "" {
+		conditions = append(conditions, fmt.Sprintf("u.uid = $%d", idx))
+		args = append(args, f.UID)
+		idx++
+	}
 	if f.Account != "" {
 		conditions = append(conditions, fmt.Sprintf("u.username ILIKE $%d", idx))
 		args = append(args, "%"+f.Account+"%")
+		idx++
+	}
+	if f.RealName != "" {
+		conditions = append(conditions, fmt.Sprintf("u.real_name ILIKE $%d", idx))
+		args = append(args, "%"+f.RealName+"%")
 		idx++
 	}
 
@@ -188,8 +199,8 @@ func (r *AdminUserRepository) ListPage(ctx context.Context, f AdminUserFilter) (
 
 	offset := (f.Page - 1) * f.PageSize
 	query := fmt.Sprintf(`
-		SELECT u.id, u.uid, u.username, u.email, u.phone, u.password,
-		       u.two_fa_enabled, u.two_fa_secret, u.status, u.avatar, u.created_at, u.updated_at,
+		SELECT u.id, u.uid, u.username, u.real_name, u.email, u.phone, u.password,
+		       u.two_fa_enabled, u.two_fa_secret, u.status, u.token_version, u.permission_version, u.avatar, u.created_at, u.updated_at,
 		       COALESCE(r.id::text, '') AS role_id,
 		       COALESCE(r.title, '') AS role_name
 		FROM admin_users u
@@ -211,8 +222,8 @@ func (r *AdminUserRepository) ListPage(ctx context.Context, f AdminUserFilter) (
 	for rows.Next() {
 		var row AdminUserRow
 		if err := rows.Scan(
-			&row.ID, &row.UID, &row.Username, &row.Email, &row.Phone, &row.Password,
-			&row.TwoFAEnabled, &row.TwoFASecret, &row.Status, &row.Avatar, &row.CreatedAt, &row.UpdatedAt,
+			&row.ID, &row.UID, &row.Username, &row.RealName, &row.Email, &row.Phone, &row.Password,
+			&row.TwoFAEnabled, &row.TwoFASecret, &row.Status, &row.TokenVersion, &row.PermissionVersion, &row.Avatar, &row.CreatedAt, &row.UpdatedAt,
 			&row.RoleID, &row.RoleName,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan admin user row: %w", err)
@@ -229,9 +240,11 @@ func (r *AdminUserRepository) ListPage(ctx context.Context, f AdminUserFilter) (
 func (r *AdminUserRepository) Update(ctx context.Context, user model.AdminUser) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE admin_users
-		SET username=$1, email=$2, phone=$3, status=$4, avatar=$5, updated_at=CURRENT_TIMESTAMP
-		WHERE id=$6
-	`, user.Username, user.Email, user.Phone, user.Status, user.Avatar, user.ID)
+		SET username=$1, real_name=$2, email=$3, phone=$4, status=$5, avatar=$6,
+		    token_version=CASE WHEN status <> $5 THEN token_version + 1 ELSE token_version END,
+		    updated_at=CURRENT_TIMESTAMP
+		WHERE id=$7
+	`, user.Username, user.RealName, user.Email, user.Phone, user.Status, user.Avatar, user.ID)
 	if err != nil {
 		return fmt.Errorf("update admin user: %w", err)
 	}
@@ -241,7 +254,7 @@ func (r *AdminUserRepository) Update(ctx context.Context, user model.AdminUser) 
 // UpdatePassword 更新管理员密码
 func (r *AdminUserRepository) UpdatePassword(ctx context.Context, id int64, hashedPassword string) error {
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE admin_users SET password=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2",
+		"UPDATE admin_users SET password=$1, token_version=token_version+1, updated_at=CURRENT_TIMESTAMP WHERE id=$2",
 		hashedPassword, id,
 	)
 	if err != nil {
@@ -253,7 +266,7 @@ func (r *AdminUserRepository) UpdatePassword(ctx context.Context, id int64, hash
 // ResetTwoFA 重置用户的 2FA 状态（清空密钥并禁用）
 func (r *AdminUserRepository) ResetTwoFA(ctx context.Context, id int64) error {
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE admin_users SET two_fa_secret=NULL, two_fa_enabled=FALSE, updated_at=CURRENT_TIMESTAMP WHERE id=$1",
+		"UPDATE admin_users SET two_fa_secret=NULL, two_fa_enabled=FALSE, token_version=token_version+1, updated_at=CURRENT_TIMESTAMP WHERE id=$1",
 		id,
 	)
 	if err != nil {
@@ -280,6 +293,12 @@ func (r *AdminUserRepository) SetRole(ctx context.Context, adminUserID int64, ro
 			return fmt.Errorf("insert user role: %w", err)
 		}
 	}
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE admin_users SET permission_version=permission_version+1, updated_at=CURRENT_TIMESTAMP WHERE id=$1",
+		adminUserID,
+	); err != nil {
+		return fmt.Errorf("bump permission version: %w", err)
+	}
 	return tx.Commit()
 }
 
@@ -295,16 +314,17 @@ func (r *AdminUserRepository) UpdateTwoFASecret(ctx context.Context, userID int6
 	return nil
 }
 
-// EnableTwoFA 将用户的 two_fa_enabled 标志置为 true，完成 2FA 绑定
-func (r *AdminUserRepository) EnableTwoFA(ctx context.Context, userID int64) error {
-	_, err := r.db.ExecContext(ctx,
-		"UPDATE admin_users SET two_fa_enabled=TRUE, updated_at=CURRENT_TIMESTAMP WHERE id=$1",
+// EnableTwoFA 将用户的 two_fa_enabled 标志置为 true，并使绑定前的受限 token 失效
+func (r *AdminUserRepository) EnableTwoFA(ctx context.Context, userID int64) (int, error) {
+	var tokenVersion int
+	err := r.db.QueryRowContext(ctx,
+		"UPDATE admin_users SET two_fa_enabled=TRUE, token_version=token_version+1, updated_at=CURRENT_TIMESTAMP WHERE id=$1 RETURNING token_version",
 		userID,
-	)
+	).Scan(&tokenVersion)
 	if err != nil {
-		return fmt.Errorf("enable 2fa: %w", err)
+		return 0, fmt.Errorf("enable 2fa: %w", err)
 	}
-	return nil
+	return tokenVersion, nil
 }
 
 // userScanner 抽象 sql.Row 和 sql.Rows 的公共 Scan 接口，便于复用 scanAdminUser
@@ -318,12 +338,15 @@ func scanAdminUser(scanner userScanner, u *model.AdminUser) error {
 		&u.ID,
 		&u.UID,
 		&u.Username,
+		&u.RealName,
 		&u.Email,
 		&u.Phone,
 		&u.Password,
 		&u.TwoFAEnabled,
 		&u.TwoFASecret,
 		&u.Status,
+		&u.TokenVersion,
+		&u.PermissionVersion,
 		&u.Avatar,
 		&u.CreatedAt,
 		&u.UpdatedAt,

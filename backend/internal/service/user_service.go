@@ -44,9 +44,9 @@ type LoginInput struct {
 
 // LoginResult 登录响应结果
 type LoginResult struct {
-	Token              string            `json:"token,omitempty"`
-	TwoFARequired      bool              `json:"twoFaRequired"`
-	TwoFASetupRequired bool              `json:"twoFaSetupRequired,omitempty"`
+	Token              string                 `json:"token,omitempty"`
+	TwoFARequired      bool                   `json:"twoFaRequired"`
+	TwoFASetupRequired bool                   `json:"twoFaSetupRequired,omitempty"`
 	User               *model.PublicAdminUser `json:"user,omitempty"`
 }
 
@@ -59,14 +59,19 @@ type TwoFASetupResult struct {
 // UserService 负责用户相关业务逻辑，包括注册、登录、2FA 绑定与验证
 type UserService struct {
 	users             UserStore          // 用户数据访问接口
-	iv                *IVService         // IV 挑战值服务，用于密码传输加密
+	iv                passwordIVStore    // IV 挑战值服务，用于密码传输加密
 	jwt               *config.JWTManager // JWT 签发与解析
 	passwordCryptoKey string             // AES-GCM 密码解密密钥
 	twoFAIssuer       string             // 2FA TOTP 发行方名称（显示在 Authenticator App 中）
 }
 
+type passwordIVStore interface {
+	Get(ctx context.Context, id string) (string, error)
+	Delete(ctx context.Context, id string) error
+}
+
 // NewUserService 构造 UserService，所有依赖通过参数注入
-func NewUserService(users UserStore, iv *IVService, jwt *config.JWTManager, passwordCryptoKey, twoFAIssuer string) *UserService {
+func NewUserService(users UserStore, iv passwordIVStore, jwt *config.JWTManager, passwordCryptoKey, twoFAIssuer string) *UserService {
 	return &UserService{
 		users:             users,
 		iv:                iv,
@@ -94,6 +99,7 @@ func (s *UserService) CreateUser(ctx context.Context, input CreateUserInput) (mo
 	user := model.AdminUser{
 		UID:      uuid.NewString(),
 		Username: input.Username,
+		RealName: input.Username,
 		Email:    input.Email,
 		Phone:    input.Phone,
 		Password: string(hash),
@@ -143,9 +149,27 @@ func (s *UserService) Login(ctx context.Context, input LoginInput) (LoginResult,
 		// 用户不存在时与密码错误返回相同错误，避免用户名枚举攻击
 		return LoginResult{}, ErrInvalidCredentials
 	}
+	if user.Status != 1 {
+		return LoginResult{}, ErrInvalidCredentials
+	}
 
 	if bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(plainPassword)) != nil {
 		return LoginResult{}, ErrInvalidCredentials
+	}
+
+	// 未绑定用户只能拿到受限 token，完成绑定后才签发正式登录态
+	if !user.TwoFAEnabled {
+		token, err := s.jwt.GenerateTwoFASetupToken(user.UID, user.Username, user.TokenVersion)
+		if err != nil {
+			return LoginResult{}, fmt.Errorf("generate 2fa setup token: %w", err)
+		}
+
+		publicUser := user.Public()
+		return LoginResult{
+			Token:              token,
+			TwoFASetupRequired: true,
+			User:               &publicUser,
+		}, nil
 	}
 
 	// 用户已绑定 2FA，需要进行二次验证
@@ -159,7 +183,7 @@ func (s *UserService) Login(ctx context.Context, input LoginInput) (LoginResult,
 		}
 	}
 
-	token, err := s.jwt.GenerateToken(user.UID, user.Username)
+	token, err := s.jwt.GenerateToken(user.UID, user.Username, user.TokenVersion)
 	if err != nil {
 		return LoginResult{}, fmt.Errorf("generate token: %w", err)
 	}
@@ -216,16 +240,18 @@ func (s *UserService) VerifyTwoFA(ctx context.Context, uid, code string) (LoginR
 		return LoginResult{}, ErrInvalidTwoFACode
 	}
 
-	if err := s.users.EnableTwoFA(ctx, user.ID); err != nil {
+	tokenVersion, err := s.users.EnableTwoFA(ctx, user.ID)
+	if err != nil {
 		return LoginResult{}, fmt.Errorf("enable 2fa: %w", err)
 	}
 
-	token, err := s.jwt.GenerateToken(user.UID, user.Username)
+	token, err := s.jwt.GenerateToken(user.UID, user.Username, tokenVersion)
 	if err != nil {
 		return LoginResult{}, fmt.Errorf("generate token: %w", err)
 	}
 
 	user.TwoFAEnabled = true
+	user.TokenVersion = tokenVersion
 	publicUser := user.Public()
 	return LoginResult{
 		Token: token,
@@ -269,6 +295,7 @@ func (s *UserService) EnsureSeedUser(ctx context.Context, username, password str
 	if err := s.users.Create(ctx, model.AdminUser{
 		UID:      uuid.NewString(),
 		Username: username,
+		RealName: username,
 		Password: string(hash),
 		Status:   1,
 	}); err != nil {
@@ -324,41 +351,22 @@ func (s *UserService) ListAdminUsers(ctx context.Context, f AdminUserFilter) ([]
 
 // GetAdminUserDetail 获取管理员账号详情（编辑回填）
 func (s *UserService) GetAdminUserDetail(ctx context.Context, uid string) (AdminUserDetail, error) {
-	rows, _, err := s.users.ListPage(ctx, repository.AdminUserFilter{Page: 1, PageSize: 1})
+	rows, _, err := s.users.ListPage(ctx, repository.AdminUserFilter{UID: uid, Page: 1, PageSize: 1})
 	if err != nil {
-		return AdminUserDetail{}, fmt.Errorf("list for detail: %w", err)
+		return AdminUserDetail{}, fmt.Errorf("get detail row: %w", err)
 	}
-	// ListPage 不支持按 UID 过滤，直接查单条
-	user, err := s.users.GetByUID(ctx, uid)
-	if err != nil {
-		return AdminUserDetail{}, fmt.Errorf("get user: %w", err)
-	}
-	if user == nil {
+	if len(rows) == 0 {
 		return AdminUserDetail{}, ErrUserNotFound
 	}
-	_ = rows
-
-	// 从 ListPage 中找到带角色信息的行
-	allRows, _, err := s.users.ListPage(ctx, repository.AdminUserFilter{Page: 1, PageSize: 10000})
-	if err != nil {
-		return AdminUserDetail{}, fmt.Errorf("get detail rows: %w", err)
-	}
-	var roleID, roleName string
-	for _, r := range allRows {
-		if r.UID == uid {
-			roleID = r.RoleID
-			roleName = r.RoleName
-			break
-		}
-	}
+	row := rows[0]
 
 	return AdminUserDetail{
-		UserID:   user.UID,
-		Account:  user.Username,
-		FullName: user.Username,
-		RoleID:   roleID,
-		RoleName: roleName,
-		State:    user.Status,
+		UserID:   row.UID,
+		Account:  row.Username,
+		FullName: row.RealName,
+		RoleID:   row.RoleID,
+		RoleName: row.RoleName,
+		State:    row.Status,
 	}, nil
 }
 
@@ -386,6 +394,7 @@ func (s *UserService) CreateAdminUser(ctx context.Context, input AdminUserCreate
 	newUser := model.AdminUser{
 		UID:      uuid.NewString(),
 		Username: input.Account,
+		RealName: input.FullName,
 		Password: string(initialHash),
 		Status:   state,
 	}
@@ -422,6 +431,12 @@ func (s *UserService) UpdateAdminUser(ctx context.Context, input AdminUserUpdate
 
 	if input.State != 0 {
 		user.Status = input.State
+	}
+	if input.Account != "" {
+		user.Username = input.Account
+	}
+	if input.FullName != "" {
+		user.RealName = input.FullName
 	}
 
 	if err := s.users.Update(ctx, *user); err != nil {

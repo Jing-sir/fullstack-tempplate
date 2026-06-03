@@ -15,12 +15,13 @@
 - 顶级模块必须使用 `component: MainLayout`
 - `MainLayout` 统一从 `./layout` 引入，不允许直接 `import('@/Main.vue')`
 - 普通业务路由必须写 `meta.requiresAuth: true`
-- 普通业务路由必须写 `meta.role`
-- `meta.role` 必须对齐后端菜单数据的 `component` 字段
+- 列表页必须写 `meta.permissionKey` 和 `meta.permissionParent`，并让两者等于后端 `menus.name`
+- 隐藏页必须写独立的 `meta.permissionKey`，并用 `meta.permissionParent` 指向父列表页权限 key
+- `meta.role` 是遗留字段，不得用于新增路由
 - 顶级模块必须写 `meta.icon`
 - 路由 `name` 必须全项目唯一
 - 页面文件默认放在 `src/views/<Module>/<feature-name>/Index.vue`
-- 不确定 `role`、`icon`、页面路径时，AI 必须先确认，不允许猜
+- 不确定权限 key、`icon`、页面路径时，AI 必须先确认，不允许猜
 - 权限接口加载成功但当前路由无权限时，系统会跳 `/error/no-permission`，不要把无权限伪装成 404
 
 `src/routes/permissionRoutes.ts` 文件顶部保持：
@@ -45,7 +46,6 @@ import { MainLayout } from './layout'
     meta: {
         title: '订单管理',
         icon: 'orderManage',
-        role: 'order',
         requiresAuth: true,
     },
     children: [
@@ -58,8 +58,9 @@ import { MainLayout } from './layout'
                 ),
             meta: {
                 title: '订单列表',
-                role: 'orderList',
                 requiresAuth: true,
+                permissionKey: 'orderList',
+                permissionParent: 'orderList',
             },
         },
     ],
@@ -68,10 +69,10 @@ import { MainLayout } from './layout'
 
 必须替换：
 
-- `order`：一级菜单 `role`
+- `order`：一级菜单 `name`
 - `订单管理`：一级菜单标题
 - `orderManage`：一级菜单图标 key
-- `orderList`：页面 `name` 和页面 `role`
+- `orderList`：页面 `name`、`permissionKey` 和 `permissionParent`
 - `@/views/Order/order-list/Index.vue`：真实页面路径
 
 ## 例子 2：已有大模块下新增小页面
@@ -90,8 +91,9 @@ import { MainLayout } from './layout'
         ),
     meta: {
         title: '退款订单',
-        role: 'refundOrderList',
         requiresAuth: true,
+        permissionKey: 'refundOrderList',
+        permissionParent: 'refundOrderList',
     },
 }
 ```
@@ -119,18 +121,20 @@ import { MainLayout } from './layout'
         ),
     meta: {
         title: '订单详情',
-        role: 'orderList',
         requiresAuth: true,
         isShow: true,
+        permissionKey: 'orderList-view',
+        permissionParent: 'orderList',
     },
 }
 ```
 
-`role` 怎么选：
+权限 key 怎么选：
 
-- 如果后端没有单独给详情页权限，隐藏页复用列表页 `role`，例如 `orderList`
-- 如果后端有单独详情权限，必须使用后端给的 `component`，例如 `orderDetail`
-- 不确定时必须问，不能猜
+- 隐藏页必须在后端 `menus` 表中有独立权限节点，例如 `orderList-view`
+- `permissionKey` 填隐藏页权限节点的 `menus.name`
+- `permissionParent` 填父列表页权限节点的 `menus.name`，例如 `orderList`
+- 后端权限节点尚未定义时必须先补契约，不允许复用父权限兜底
 
 页面跳转示例：
 
@@ -153,9 +157,10 @@ router.push({
         import(/* webpackChunkName: "orderAdd" */ '@/views/Order/order-list/form/Index.vue'),
     meta: {
         title: '新增订单',
-        role: 'orderList',
         requiresAuth: true,
         isShow: true,
+        permissionKey: 'orderList-add',
+        permissionParent: 'orderList',
     },
 },
 {
@@ -165,9 +170,10 @@ router.push({
         import(/* webpackChunkName: "orderEdit" */ '@/views/Order/order-list/form/Index.vue'),
     meta: {
         title: '编辑订单',
-        role: 'orderList',
         requiresAuth: true,
         isShow: true,
+        permissionKey: 'orderList-edit',
+        permissionParent: 'orderList',
     },
 }
 ```
@@ -177,10 +183,12 @@ router.push({
 | 信息 | 谁提供 | 没有时怎么办 |
 | --- | --- | --- |
 | 一级菜单标题 | 用户 / 旧项目 / 后端菜单 | 标记待确认 |
-| 一级菜单 role | 后端菜单 `component` | 不能猜 |
+| 一级菜单权限 key | 后端菜单 `name` | 不能猜 |
 | 一级菜单 icon | 项目已有 icon key 或用户指定 | 不能猜 |
 | 页面标题 | 用户 / 旧项目 | 标记待确认 |
-| 页面 role | 后端菜单 `component` | 不能猜 |
+| 列表页 `permissionKey` | 后端菜单 `name` | 不能猜 |
+| 隐藏页 `permissionKey` | 后端隐藏权限节点 `name` | 不能猜，不允许复用父权限 |
+| 隐藏页 `permissionParent` | 父列表页权限节点 `name` | 不能猜 |
 | 是否隐藏 | 需求决定 | 详情/编辑页默认隐藏 |
 | 页面文件路径 | 按 `src/views/<Module>/<feature>/Index.vue` | 由 AI 给出并说明 |
 
@@ -196,7 +204,7 @@ component: () => import('@/Main.vue')
     component: MainLayout,
 }
 
-// 禁止：业务页面没有权限 role
+// 禁止：列表页没有权限 key 和父页面 key
 meta: {
     title: '订单列表',
     requiresAuth: true,
@@ -205,7 +213,8 @@ meta: {
 // 禁止：详情页忘记隐藏，导致出现在左侧菜单
 meta: {
     title: '订单详情',
-    role: 'orderDetail',
     requiresAuth: true,
+    permissionKey: 'orderList-view',
+    permissionParent: 'orderList',
 }
 ```

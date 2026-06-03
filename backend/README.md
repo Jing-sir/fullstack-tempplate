@@ -13,7 +13,21 @@ brew extract --version=17.9 postgresql@17 xiangnan/postgresql-versions
 brew install xiangnan/postgresql-versions/postgresql@17.9
 brew services start xiangnan/postgresql-versions/postgresql@17.9
 /opt/homebrew/opt/postgresql@17.9/bin/createdb mydb
-/opt/homebrew/opt/postgresql@17.9/bin/psql mydb -f migrations/001_init.sql
+for migration in \
+  migrations/001_init.sql \
+  migrations/002_permission.up.sql \
+  migrations/003_operation_log.up.sql \
+  migrations/004_menu_type_refactor.up.sql \
+  migrations/005_account_hidden_routes.up.sql \
+  migrations/006_button_permissions.up.sql \
+  migrations/007_superadmin_new_menus.up.sql \
+  migrations/008_permission_hardening.up.sql \
+  migrations/009_business_permissions.up.sql \
+  migrations/010_admin_user_real_name.up.sql \
+  migrations/011_permission_version.up.sql
+do
+  /opt/homebrew/opt/postgresql@17.9/bin/psql mydb -v ON_ERROR_STOP=1 -f "$migration"
+done
 ```
 
 2. Copy `.env.example` to `.env` and adjust secrets/DSN for your machine.
@@ -31,6 +45,14 @@ For a containerized local stack:
 docker compose up --build
 ```
 
+Only forward migrations are mounted into PostgreSQL's initialization directory.
+Rollback files stay under `migrations/` for manual use and are never executed
+automatically during bootstrap.
+
+The current migrations create the schema but do not yet seed the complete
+baseline role and menu tree. A fresh environment still needs an explicit
+permission seed before it can be used as an administrator console.
+
 ## Main Endpoints
 
 All public backend endpoints are versioned under a fixed prefix. The current
@@ -40,11 +62,20 @@ prefix such as `/api/v2`.
 - `POST /api/v1/login`
 - `POST /api/v1/users`
 - `GET /api/v1/security/iv`
-- `GET /api/v1/users`
+- `POST /api/v1/users/list`
 - `GET /api/v1/user/2fa/setup`
 - `POST /api/v1/user/2fa/verify`
 
 Protected endpoints require `Authorization: Bearer <token>`.
+
+Key permission endpoints:
+
+- `POST /api/v1/permissions/list`, body: `{ "parentKey": "accountManage" }`
+- `GET /api/v1/roles/info/:id`
+- `GET /api/v1/roles/menus/:id`
+- `PUT /api/v1/roles/menus/:id`
+
+Dynamic path parameters must appear in the final URL segment.
 
 ## Configuration
 

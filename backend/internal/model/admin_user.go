@@ -7,18 +7,21 @@ import (
 
 // AdminUser 对应 admin_users 表，代表后台管理系统的操作员账号
 type AdminUser struct {
-	ID           int64          `json:"id"`
-	UID          string         `json:"uid"`
-	Username     string         `json:"username"`
-	Email        string         `json:"email"`
-	Phone        string         `json:"phone"`
-	Password     string         `json:"-"`              // bcrypt 哈希，序列化时隐藏
-	TwoFAEnabled bool           `json:"two_fa_enabled"`
-	TwoFASecret  sql.NullString `json:"-"`              // TOTP 密钥，序列化时隐藏
-	Status       int            `json:"status"`         // 1=正常 0=禁用
-	Avatar       string         `json:"avatar"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	ID                int64          `json:"id"`
+	UID               string         `json:"uid"`
+	Username          string         `json:"username"`
+	RealName          string         `json:"real_name"`
+	Email             string         `json:"email"`
+	Phone             string         `json:"phone"`
+	Password          string         `json:"-"` // bcrypt 哈希，序列化时隐藏
+	TwoFAEnabled      bool           `json:"two_fa_enabled"`
+	TwoFASecret       sql.NullString `json:"-"`      // TOTP 密钥，序列化时隐藏
+	Status            int            `json:"status"` // 1=正常 0=禁用
+	TokenVersion      int            `json:"-"`      // 安全状态变更后递增，使旧 JWT 立即失效
+	PermissionVersion int64          `json:"-"`      // 权限来源变更后递增，通知前端刷新权限缓存
+	Avatar            string         `json:"avatar"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
 }
 
 // PublicAdminUser 是对外安全暴露的管理员信息，不含密码哈希和 2FA 密钥
@@ -26,6 +29,7 @@ type PublicAdminUser struct {
 	ID           int64     `json:"id"`
 	UID          string    `json:"uid"`
 	Username     string    `json:"username"`
+	RealName     string    `json:"real_name"`
 	Email        string    `json:"email"`
 	Phone        string    `json:"phone"`
 	TwoFAEnabled bool      `json:"two_fa_enabled"`
@@ -41,6 +45,7 @@ func (u AdminUser) Public() PublicAdminUser {
 		ID:           u.ID,
 		UID:          u.UID,
 		Username:     u.Username,
+		RealName:     u.RealName,
 		Email:        u.Email,
 		Phone:        u.Phone,
 		TwoFAEnabled: u.TwoFAEnabled,

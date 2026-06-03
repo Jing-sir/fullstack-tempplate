@@ -1,34 +1,37 @@
 # permission-tree-linkage Specification
 
 ## Purpose
-TBD - created by archiving change permission-type-refactor. Update Purpose after archive.
+角色授权页允许独立配置页面、按钮和 Tabs，同时由后端保证父链完整。
+
 ## Requirements
-### Requirement: 勾选 type=2 菜单页时自动联动 type=3 子节点
-在权限配置页（`role-permissions/form/Index.vue`）中，当用户勾选一个 type=2 菜单页节点时，该节点下所有 type=3 后代节点 SHALL 被自动加入 `currState.checkedKeys`；当用户取消勾选 type=2 节点时，其下所有 type=3 后代节点 SHALL 被自动从 `checkedKeys` 中移除。
+### Requirement: 权限节点独立勾选
+权限配置树 SHALL 使用 `check-strictly`。列表页、隐藏页面、按钮和 Tabs SHALL 可独立勾选，不自动联动隐藏页面。
 
-#### Scenario: 勾选 type=2 节点联动 type=3
-- **WHEN** 用户勾选权限树中 type=2 的 `rolePermissions` 节点
-- **THEN** `viewRolePermissions`、`editRolePermissions`、`addRolePermissions`（type=3）自动加入 checkedKeys
+#### Scenario: 列表页不自动授予编辑页
+- **WHEN** 管理员勾选 `rolePermissions`
+- **THEN** `rolePermissions-edit` 不会被前端自动加入 `checkedKeys`
 
-#### Scenario: 取消勾选 type=2 节点联动取消 type=3
-- **WHEN** 用户取消勾选 type=2 的 `rolePermissions` 节点
-- **THEN** 其下所有 type=3 子节点自动从 checkedKeys 中移除
+#### Scenario: 隐藏页面可以单独取消
+- **WHEN** 管理员取消勾选 `rolePermissions-edit`
+- **THEN** 其它同级权限保持不变
 
-### Requirement: type=3 节点在权限配置树中不可单独操作
-权限配置树中 type=3 的节点 SHALL 渲染为 `disableCheckbox: true`，用户不能直接勾选或取消勾选 type=3 节点，只能通过父级 type=2 节点联动控制。
+### Requirement: 已选清单展示完整业务权限
+右侧已选权限清单 SHALL 展示隐藏页面、按钮和 Tabs，便于管理员识别实际授权范围。
 
-#### Scenario: type=3 节点 checkbox 不可操作
-- **WHEN** 权限配置树渲染完毕
-- **THEN** type=3 节点的 checkbox 处于禁用状态（visually grayed out），点击无响应
+#### Scenario: 已选清单展示编辑权限
+- **WHEN** 角色勾选 `rolePermissions-edit`
+- **THEN** 右侧清单展示编辑角色权限
 
-#### Scenario: 查看模式下 type=3 节点正常展示已选状态
-- **WHEN** 以查看模式（`see=true`）打开权限配置页，角色已有 viewRolePermissions 权限
-- **THEN** viewRolePermissions 节点 checkbox 显示为已选且禁用状态
+### Requirement: 查看模式只读
+查看模式 SHALL 禁用全部权限 checkbox。编辑模式 SHALL 允许操作各类权限节点。
 
-### Requirement: 右侧已选权限清单过滤 type=3 节点
-右侧"已选权限清单"面板 SHALL 不展示 type=3 节点（隐藏路由页对管理员无业务语义），仅展示 type=1（目录分组）、type=2（菜单页）、type=4（按钮）节点。
+#### Scenario: 查看模式不可编辑
+- **WHEN** 使用查看模式打开角色权限详情
+- **THEN** 所有 checkbox 均不可操作
 
-#### Scenario: 已选清单不展示 type=3
-- **WHEN** 角色已勾选 rolePermissions（type=2）及其下 type=3 子节点
-- **THEN** 右侧已选清单只展示 rolePermissions，不展示 viewRolePermissions 等 type=3 条目
+### Requirement: 后端保存祖先闭包
+保存角色权限时，后端 SHALL 自动补齐每个已选节点的祖先节点。
 
+#### Scenario: 单独授予 Tab 内按钮
+- **WHEN** 提交一个 Tab 内按钮 menu ID
+- **THEN** 后端同时保存其 Tab、列表页和目录祖先

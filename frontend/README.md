@@ -232,7 +232,7 @@ pnpm exec eslint src/path/to/file.ts src/path/to/file.vue
     - 聚合导出完整路由数组
 - `src/routes/constantRoutes.ts`
     - 常驻路由
-- `src/routes/asyncRoutes.ts`
+- `src/routes/permissionRoutes.ts`
     - 受权限控制的路由
 
 其中路由定义主要分为：
@@ -241,7 +241,7 @@ pnpm exec eslint src/path/to/file.ts src/path/to/file.vue
     - 登录页
     - 错误页
     - 无权限页
-- `asyncRoutes.ts`
+- `permissionRoutes.ts`
     - 首页
     - 系统管理模块
 
@@ -259,22 +259,26 @@ pnpm exec eslint src/path/to/file.ts src/path/to/file.vue
 
 权限数据主要来自两个接口：
 
-- `src/api/sys.ts` 中的 `menuList()`
-- `src/api/permission.ts` 中的 `homeMenu()`
+- `POST /api/v1/menus/list`：返回当前用户的目录和列表页导航树
+- `POST /api/v1/permissions/list`：按 `parentKey` 返回当前用户的隐藏页、按钮和 Tab 子权限树
 
 实际布局中，左侧菜单主要通过 `src/store/sideBar.ts`：
 
-1. 调用 `api.menuList()`
-2. 将后端返回的 `component` 字段与本地 `asyncRoutes` 的 `meta.role` 做匹配
+1. 调用 `sysRoleApi.menuList()`
+2. 将后端返回的 `component || name` 与本地 `permissionRoutes` 的 `meta.permissionKey || route.name` 做匹配
 3. 生成当前用户可见的动态路由树
 4. 存入：
     - `roleMenu`：原始权限菜单
     - `routes`：过滤后的前端路由树
+    - `pagePermissionTrees`：按父列表页缓存的子权限树
 
 ### 7.4 权限相关约定
 
 - `meta.title` 使用中文 key，不直接写英文语义 key
-- `meta.role` 必须和后端权限名保持一致
+- 列表页必须声明 `meta.permissionKey` 和同值的 `meta.permissionParent`
+- 隐藏页必须声明独立的 `meta.permissionKey`，并用 `meta.permissionParent` 指向父列表页
+- `meta.permissionKey` 必须和后端 `menus.name` 保持一致
+- `meta.role` 是遗留字段，不得用于新增路由
 - 按钮权限判断统一走 `src/use/useButtonRole.ts`
 
 ## 8. 请求层与 API 组织
@@ -294,6 +298,7 @@ pnpm exec eslint src/path/to/file.ts src/path/to/file.vue
     - `code === 200` 时直接返回 `data`
     - 其它业务错误弹出 Arco `Message.error`
     - `10005` 时清空 `manageToken` 并跳转登录页
+    - `X-Permission-Version` 变化时主动刷新导航和页面子权限缓存
 
 ### 8.2 `src/api/api.ts`
 

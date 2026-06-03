@@ -1,10 +1,9 @@
-import { storeToRefs } from 'pinia';
 import useSideBar from '@/store/sideBar';
 import { useRoute } from 'vue-router';
 
 export default function useButtonRole() { // 按钮权限列表获取
     const route = useRoute();
-    const { roleMenu } = storeToRefs(useSideBar());
+    const sidebarStore = useSideBar();
 
     /**
      * 判断按钮是否具备权限。
@@ -18,10 +17,7 @@ export default function useButtonRole() { // 按钮权限列表获取
         const currentRouteName = String(routeName ?? route.name ?? '');
         if (!currentRouteName || !btnRole) return false;
 
-        // 这里使用 >= 0，避免命中数组第一个权限项时被误判成无权限。
-        return (
-            roleMenu.value.findIndex(({ name }) => name === `${currentRouteName}-${btnRole}`) >= 0
-        );
+        return sidebarStore.hasPermission(`${currentRouteName}-${btnRole}`);
     };
 
     return {

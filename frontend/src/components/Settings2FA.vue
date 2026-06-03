@@ -6,7 +6,7 @@ import apiUser from '@/api/userApi/sys/security'
 import { handlePaste } from '@/utils/common'
 import VueQr from 'vue-qr'
 import useCurrentUserSecurity from '@/use/useCurrentUserSecurity'
-import { clearManageToken } from '@/utils/session'
+import { clearManageToken, setManageToken } from '@/utils/session'
 
 type Settings2FAType = 'add' | 'edit' | 'loginset' | 'login'
 
@@ -191,9 +191,14 @@ const handleVerifySubmit = async (): Promise<void> => {
     }
 
     isSubmitLoading.value = true
-    await apiUser.validateGoogleCode({ googleCode: formState.code }).finally(() => {
-        isSubmitLoading.value = false
-    })
+    const loginResult = await apiUser
+        .validateGoogleCode({ googleCode: formState.code })
+        .finally(() => {
+            isSubmitLoading.value = false
+        })
+    if (loginResult.token) {
+        setManageToken(loginResult.token)
+    }
     emit('onSuccess')
     Message.success(t('验证成功'))
 }

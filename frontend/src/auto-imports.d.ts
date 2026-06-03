@@ -62,6 +62,7 @@ declare global {
   const getCurrentScope: typeof import('vue').getCurrentScope
   const getCurrentWatcher: typeof import('vue').getCurrentWatcher
   const getFlashLimitRangeText: typeof import('./utils/rangeText').getFlashLimitRangeText
+  const getManagePermissionVersion: typeof import('./utils/session').getManagePermissionVersion
   const getManageToken: typeof import('./utils/session').getManageToken
   const h: typeof import('vue').h
   const handlePaste: typeof import('./utils/common').handlePaste
@@ -116,6 +117,7 @@ declare global {
   const resolveLabelTagList: typeof import('./utils/labelTags').resolveLabelTagList
   const sanitizeTradeOptions: typeof import('./utils/tradeOptions').sanitizeTradeOptions
   const setActivePinia: typeof import('pinia').setActivePinia
+  const setManagePermissionVersion: typeof import('./utils/session').setManagePermissionVersion
   const setManageToken: typeof import('./utils/session').setManageToken
   const setMapStoreSuffix: typeof import('pinia').setMapStoreSuffix
   const shallowReactive: typeof import('vue').shallowReactive

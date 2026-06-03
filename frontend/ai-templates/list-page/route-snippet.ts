@@ -8,7 +8,6 @@ export const exampleRouteSnippet = {
     meta: {
         title: '示例管理',
         icon: 'systemManage',
-        role: 'example',
         requiresAuth: true,
     },
     children: [
@@ -21,8 +20,9 @@ export const exampleRouteSnippet = {
                 ),
             meta: {
                 title: '示例列表',
-                role: 'exampleList',
                 requiresAuth: true,
+                permissionKey: 'exampleList',
+                permissionParent: 'exampleList',
             },
         },
     ],

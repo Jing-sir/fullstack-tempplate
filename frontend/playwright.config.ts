@@ -16,7 +16,7 @@ export default defineConfig({
         video: 'retain-on-failure',
     },
     webServer: {
-        command: 'pnpm run build && pnpm run preview -- --host 127.0.0.1 --port 60001',
+        command: 'pnpm run build && pnpm run preview --host 127.0.0.1 --port 60001',
         url: 'http://127.0.0.1:60001/login',
         reuseExistingServer: false,
         timeout: 120000,

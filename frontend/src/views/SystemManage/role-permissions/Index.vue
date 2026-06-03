@@ -32,6 +32,7 @@ const tableColumns = computed<ColumnType[]>(() => [
             type: 'actionButtons',
             buttons: [
                 {
+                    buttonKey: 'view',
                     text: t('查看权限'),
                     onClick: async (record) => {
                         await router.push(
@@ -40,6 +41,7 @@ const tableColumns = computed<ColumnType[]>(() => [
                     },
                 },
                 {
+                    buttonKey: 'edit',
                     text: t('编辑'),
                     onClick: async (record) => {
                         await router.push(

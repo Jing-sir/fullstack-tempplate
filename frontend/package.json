@@ -12,7 +12,7 @@
         "preview": "vite preview",
         "typecheck": "vue-tsc --noEmit",
         "e2e": "playwright test",
-        "e2e:smoke": "playwright test tests/e2e/login.smoke.spec.ts tests/e2e/menu-list.smoke.spec.ts",
+        "e2e:smoke": "playwright test tests/e2e/login.smoke.spec.ts tests/e2e/menu-list.smoke.spec.ts tests/e2e/permission-route.smoke.spec.ts",
         "e2e:menu": "playwright test tests/e2e/menu-list.smoke.spec.ts",
         "e2e:module": "playwright test tests/e2e/module-regression.spec.ts",
         "e2e:ui": "playwright test --ui",

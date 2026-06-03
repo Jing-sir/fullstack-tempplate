@@ -1,20 +1,10 @@
 <script setup lang="ts">
-import { storeToRefs } from 'pinia';
 import useSideBar from '@/store/sideBar';
 import { useRoute } from 'vue-router';
 
 type ButtonType = 'primary' | 'secondary' | 'outline' | 'dashed' | 'text';
 type ButtonStatus = 'normal' | 'success' | 'warning' | 'danger';
 type ButtonSize = 'mini' | 'small' | 'medium' | 'large';
-type RoleMenuItem = {
-    id?: string | number;
-    menuId?: string | number;
-    parentId?: string | number | null;
-    name?: string;
-    component?: string;
-    route?: string;
-};
-
 interface PermissionButtonProps {
     buttonKey?: string;
     routeName?: string;
@@ -43,7 +33,7 @@ const emit = defineEmits<{
 
 const attrs = useAttrs();
 const route = useRoute();
-const { roleMenu } = storeToRefs(useSideBar());
+const sidebarStore = useSideBar();
 
 /**
  * 是否需要做权限校验。
@@ -63,26 +53,9 @@ const toValue = (value: unknown): string => String(value ?? '');
 const currentRouteName = computed(() => toValue(props.routeName || route.name));
 
 /**
- * 兼容老项目菜单结构：
- * 1. 先用 routeName 找当前菜单节点（component/route/name 任一匹配）
- * 2. 再按 menuId 或 id 找子按钮（parentId 对应）
- */
-const getButtonsForMenu = (routeName: string): RoleMenuItem[] => {
-    const menuList = roleMenu.value as unknown as RoleMenuItem[];
-    const currentMenu = menuList.find((item) =>
-        [item.component, item.route, item.name].some((field) => toValue(field) === routeName),
-    );
-    if (!currentMenu) return [];
-
-    const menuId = toValue(currentMenu.menuId ?? currentMenu.id);
-    if (!menuId) return [];
-
-    return menuList.filter((item) => toValue(item.parentId) === menuId);
-};
-
-/**
  * 当前按钮是否具备权限。
- * 优先匹配新项目规则 `${routeName}-${buttonKey}`，再回退老项目 `component === buttonKey`。
+ * 路由守卫已按列表页加载页面权限子树，这里统一从 Store 的递归索引判断。
+ * 因此列表按钮、Tab 以及 Tab 内按钮无论嵌套多少层都能使用同一套权限 key。
  */
 const hasPermission = computed(() => {
     if (!shouldCheckPermission.value) return true;
@@ -90,16 +63,7 @@ const hasPermission = computed(() => {
     const buttonKey = toValue(props.buttonKey);
     if (!routeName || !buttonKey) return false;
 
-    const menuList = roleMenu.value as unknown as RoleMenuItem[];
-    const newPermissionName = `${routeName}-${buttonKey}`;
-
-    const hasNewPermission = menuList.some((item) =>
-        [item.name, item.component].some((field) => toValue(field) === newPermissionName),
-    );
-    if (hasNewPermission) return true;
-
-    const buttonList = getButtonsForMenu(routeName);
-    return buttonList.some((item) => toValue(item.component) === buttonKey);
+    return sidebarStore.hasPermission(`${routeName}-${buttonKey}`);
 });
 
 /**

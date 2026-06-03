@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"auth-service/internal/consts"
+	"auth-service/internal/middleware"
 	"auth-service/internal/response"
 	"auth-service/internal/service"
 
@@ -20,6 +21,24 @@ func (h *Handler) ListMenus(c *gin.Context) {
 	}
 
 	tree, err := h.perms.GetMyMenus(c.Request.Context(), user)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.Success(c, tree)
+}
+
+// ListPagePermissions 返回当前用户在指定菜单页下拥有的完整子权限树
+func (h *Handler) ListPagePermissions(c *gin.Context) {
+	var input struct {
+		ParentKey string `json:"parentKey" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, consts.BadRequest, "参数错误")
+		return
+	}
+
+	tree, err := h.perms.GetMyPagePermissions(c.Request.Context(), middleware.GetAdminUserID(c), input.ParentKey)
 	if err != nil {
 		writeServiceError(c, err)
 		return

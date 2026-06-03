@@ -60,6 +60,8 @@ const permissionRoutes: RouteRecordRaw[] = [
                     title: '操作日志',
                     icon: 'operationLog',
                     requiresAuth: true,
+                    permissionKey: 'operationLog',
+                    permissionParent: 'operationLog',
                 },
             },
             {
@@ -71,6 +73,8 @@ const permissionRoutes: RouteRecordRaw[] = [
                     title: '角色与权限',
                     icon: 'rolePermissions',
                     requiresAuth: true,
+                    permissionKey: 'rolePermissions',
+                    permissionParent: 'rolePermissions',
                 },
             },
             {
@@ -78,21 +82,39 @@ const permissionRoutes: RouteRecordRaw[] = [
                 path: 'addRolePermissions',
                 name: 'addRolePermissions',
                 component: loadRouteView('SystemManage/role-permissions/form/Index'),
-                meta: { title: '新增', isShow: true, requiresAuth: true },
+                meta: {
+                    title: '新增',
+                    isShow: true,
+                    requiresAuth: true,
+                    permissionKey: 'rolePermissions-add',
+                    permissionParent: 'rolePermissions',
+                },
             },
             {
                 // 角色与权限-查看
                 path: 'viewRolePermissions/:id/:see',
                 name: 'viewRolePermissions',
                 component: loadRouteView('SystemManage/role-permissions/form/Index'),
-                meta: { title: '查看', isShow: true, requiresAuth: true },
+                meta: {
+                    title: '查看',
+                    isShow: true,
+                    requiresAuth: true,
+                    permissionKey: 'rolePermissions-view',
+                    permissionParent: 'rolePermissions',
+                },
             },
             {
                 // 角色与权限-编辑
                 path: 'editRolePermissions/:id',
                 name: 'editRolePermissions',
                 component: loadRouteView('SystemManage/role-permissions/form/Index'),
-                meta: { title: '编辑', isShow: true, requiresAuth: true },
+                meta: {
+                    title: '编辑',
+                    isShow: true,
+                    requiresAuth: true,
+                    permissionKey: 'rolePermissions-edit',
+                    permissionParent: 'rolePermissions',
+                },
             },
             {
                 // 账号管理
@@ -103,6 +125,8 @@ const permissionRoutes: RouteRecordRaw[] = [
                     title: '账号管理',
                     icon: 'accountManage',
                     requiresAuth: true,
+                    permissionKey: 'accountManage',
+                    permissionParent: 'accountManage',
                 },
             },
             {
@@ -110,14 +134,26 @@ const permissionRoutes: RouteRecordRaw[] = [
                 path: 'addAccount',
                 name: 'addAccount',
                 component: loadRouteView('SystemManage/account-manage/form/Index'),
-                meta: { title: '新增', requiresAuth: true, isShow: true },
+                meta: {
+                    title: '新增',
+                    requiresAuth: true,
+                    isShow: true,
+                    permissionKey: 'accountManage-add',
+                    permissionParent: 'accountManage',
+                },
             },
             {
                 // 账号管理-编辑
                 path: 'editAccount/:id',
                 name: 'editAccount',
                 component: loadRouteView('SystemManage/account-manage/form/Index'),
-                meta: { title: '编辑', requiresAuth: true, isShow: true },
+                meta: {
+                    title: '编辑',
+                    requiresAuth: true,
+                    isShow: true,
+                    permissionKey: 'accountManage-edit',
+                    permissionParent: 'accountManage',
+                },
             },
         ],
     },

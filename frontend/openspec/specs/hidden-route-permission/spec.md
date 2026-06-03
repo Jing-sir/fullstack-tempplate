@@ -1,39 +1,30 @@
 # hidden-route-permission Specification
 
 ## Purpose
-TBD - created by archiving change permission-type-refactor. Update Purpose after archive.
+隐藏业务页面必须独立授权，禁止通过地址栏输入 URL 绕过权限校验。
+
 ## Requirements
-### Requirement: type=3 隐藏路由页通过 permissionMap 正常放行
-前端 `sideBar.ts` 的 `collectComponents` SHALL 将后端返回的所有 type=1/2/3 菜单节点的 `name` 收集进 `fetchRoleObj`，type=4 按钮节点 SHALL 被跳过，不混入路由过滤逻辑。
+### Requirement: 隐藏页面严格校验业务权限 key
+隐藏页面 SHALL 显式声明 `meta.permissionKey` 和 `meta.permissionParent`。路由守卫 SHALL 先确认父列表页权限，再请求父页面子权限树，并严格校验隐藏页面的业务权限 key。
 
-#### Scenario: type=3 路由正常放行
-- **WHEN** 当前用户角色拥有 `viewRolePermissions` 菜单权限（type=3）
-- **THEN** 访问 `/systemManage/viewRolePermissions/:id/:see` 时路由守卫校验通过，页面正常渲染
+#### Scenario: 独立授权后正常访问
+- **WHEN** 用户拥有 `rolePermissions` 和 `rolePermissions-view`
+- **THEN** 访问 `/systemManage/viewRolePermissions/:id/:see` 时正常渲染
 
-#### Scenario: type=4 按钮 key 不干扰路由过滤
-- **WHEN** 用户角色拥有 `rolePermissions-edit`（type=4）权限
-- **THEN** `getAsyRouter` 不会尝试匹配名为 `rolePermissions-edit` 的路由，路由列表不受影响
+#### Scenario: 只有父列表权限时拒绝直接访问
+- **WHEN** 用户只有 `rolePermissions`，没有 `rolePermissions-edit`
+- **THEN** 直接输入 `/systemManage/editRolePermissions/:id` 时跳转 no-permission 页
 
-### Requirement: isShow 路由守卫安全网
-前端 `router-setup.ts` 的 `setRequiresAuth` 守卫 SHALL 在以下条件同时满足时执行 fallback：
-- 目标路由 `meta.isShow === true`
-- 目标路由 `name` 不在 `permissionMap` 中
+### Requirement: 禁止父级 fallback 放行
+路由守卫 SHALL NOT 因为用户拥有父列表页权限而放行未授权隐藏页面。
 
-Fallback 逻辑：向上遍历 `to.matched`，找到第一个 `meta.isShow` 不为 true 且 `name` 在 `permissionMap` 中的父级，若找到则放行，否则跳转 no-permission 页。同时 SHALL 在 console 输出 warn，提示该路由未注册到菜单表。
-
-#### Scenario: isShow 路由未入库时 fallback 到父级权限
-- **WHEN** 用户有 `rolePermissions`（type=2）权限，但 `viewRolePermissions`（type=3）尚未入库
-- **THEN** 路由守卫 fallback 找到父级 `rolePermissions`，放行访问，console 输出 warn
-
-#### Scenario: 父级也无权限时跳转 no-permission
-- **WHEN** 用户没有 `rolePermissions` 权限，访问 `/systemManage/viewRolePermissions/1/1`
-- **THEN** 路由守卫跳转到 no-permission 页面
+#### Scenario: 隐藏页面未配置时拒绝访问
+- **WHEN** 用户拥有 `rolePermissions`，但目标隐藏页面权限未入库或未授权
+- **THEN** 路由守卫跳转 no-permission 页
 
 ### Requirement: 前端 TreeDataType 透传 type 字段
-`frontend/src/interface/SystemManageType.ts` 的 `TreeDataType` SHALL 包含 `type?: number` 字段。
-`frontend/src/api/sys/role.ts` 的 `sysRoleMenuList` normalize 函数 SHALL 将后端返回的 `item.type` 赋值给 `TreeDataType.type`。
+`TreeDataType` SHALL 包含 `type?: number`。`sysRoleMenuList` normalize SHALL 保留后端返回的 `item.type`。
 
 #### Scenario: normalize 后 type 字段不丢失
 - **WHEN** 后端返回菜单节点含 `type: 3`
-- **THEN** 前端 normalize 后的 TreeDataType 对象 `type` 值为 3
-
+- **THEN** normalize 后对象的 `type` 值为 3

@@ -4,7 +4,6 @@ import { storeToRefs } from 'pinia'
 import routes from '../routes'
 import pinia from '../store/Index'
 import useSidebar from '@/store/sideBar'
-import type permissionApi from '@/api/permission'
 import i18n, { setI18nLanguage } from './i18n-setup'
 import { getManageToken } from '@/utils/session'
 
@@ -13,7 +12,6 @@ type RouterGuardHandler = (
     to: RouteLocationNormalized,
     from: RouteLocationNormalized,
 ) => Promise<GuardResult>
-type PermissionMenuItem = PromiseReturnType<typeof permissionApi.homeMenu>[number]
 
 const TITLE = window.document.title
 const buildNoPermissionPath = (to: RouteLocationNormalized, role: string): string => {
@@ -64,6 +62,7 @@ const routerGuards: Record<string, RouterGuardHandler> = {
 
         // 未登录访问受保护路由时，统一跳转登录页并保留目标地址，登录后可回跳。
         if (!hasToken) {
+            useSidebar(pinia).resetPermissions()
             if (!requiresAuth) return true
             return `/login?redirect=${encodeURIComponent(to.fullPath || to.path || '/')}`
         }
@@ -73,7 +72,7 @@ const routerGuards: Record<string, RouterGuardHandler> = {
         }
 
         const store = useSidebar(pinia)
-        const { hasFetchedRoleMenu, roleMenu } = storeToRefs(store)
+        const { hasFetchedRoleMenu } = storeToRefs(store)
 
         if (requiresAuth && !ignorePermission && !hasFetchedRoleMenu.value) {
             await store.fetchSidebarRoutes()
@@ -88,42 +87,35 @@ const routerGuards: Record<string, RouterGuardHandler> = {
         if (ignorePermission) return true
         if (!hasFetchedRoleMenu.value) return '/error'
 
-        const permissionMenus = roleMenu.value as PermissionMenuItem[]
+        const routePermissionKey =
+            typeof to.meta.permissionKey === 'string'
+                ? to.meta.permissionKey
+                : typeof to.name === 'string'
+                  ? to.name
+                  : ''
+        const permissionParent =
+            typeof to.meta.permissionParent === 'string' ? to.meta.permissionParent : ''
 
-        // 菜单是树结构，需要递归把所有层级的 component 收集为权限 key
-        const collectPermissions = (items: PermissionMenuItem[]): Record<string, string> => {
-            const result: Record<string, string> = {}
-            for (const item of items) {
-                const key = String(item.component || item.name || '')
-                if (key) result[key] = key
-                const children = (item as unknown as { children?: PermissionMenuItem[] }).children
-                if (children?.length) Object.assign(result, collectPermissions(children))
+        if (!routePermissionKey) return '/error'
+
+        if (permissionParent) {
+            // 页面子权限接口只允许拥有父列表页权限的用户调用。
+            // 直接在地址栏输入新增、编辑 URL 时，也必须先加载父页面子树再严格校验业务权限 key。
+            if (!store.hasPermission(permissionParent)) {
+                return buildNoPermissionPath(to, routePermissionKey)
             }
-            return result
-        }
-        const permissionMap = collectPermissions(permissionMenus)
-
-        const routeRole = typeof to.name === 'string' ? to.name : ''
-        if (!routeRole) return '/error'
-        if (permissionMap[routeRole]) return true
-
-        // isShow:true 的隐藏路由页（type=3）安全网：
-        // 若该路由未在菜单表入库，向上找第一个有权限的非 isShow 父级放行。
-        // 正常情况下 type=3 数据已入库，permissionMap 直接命中；此处仅作开发期降级兜底。
-        if (to.meta.isShow) {
-            const parentMatched = [...to.matched]
-                .reverse()
-                .find((r) => !r.meta?.isShow && permissionMap[String(r.name ?? '')])
-            if (parentMatched) {
-                console.warn(
-                    `[router] isShow 路由 "${routeRole}" 未在菜单表中注册（type=3），` +
-                    `已 fallback 到父级 "${String(parentMatched.name)}" 权限放行。请检查迁移 SQL 是否执行。`,
-                )
-                return true
+            try {
+                await store.fetchPagePermissions(permissionParent)
+            } catch {
+                if (!getManageToken()) {
+                    return `/login?redirect=${encodeURIComponent(to.fullPath || to.path || '/')}`
+                }
+                return '/error'
             }
         }
 
-        return buildNoPermissionPath(to, routeRole)
+        if (store.hasPermission(routePermissionKey)) return true
+        return buildNoPermissionPath(to, routePermissionKey)
     },
 
     async setRedirect(to, from): Promise<GuardResult> {
@@ -146,7 +138,13 @@ router.beforeEach(async (to, from): Promise<RouteLocationRaw | boolean> => {
         .find((result): result is string => typeof result === 'string' && Boolean(result))
 
     if (redirectPath) {
-        return { path: redirectPath, replace: true }
+        const resolvedRedirect = router.resolve(redirectPath)
+        return {
+            path: resolvedRedirect.path,
+            query: resolvedRedirect.query,
+            hash: resolvedRedirect.hash,
+            replace: true,
+        }
     }
 
     if (responses.some((result) => result === false)) {
@@ -184,6 +182,8 @@ declare module 'vue-router' {
         ignorePermission?: boolean
         isShow?: boolean
         role?: string
+        permissionKey?: string
+        permissionParent?: string
         icon?: string
         hidden?: boolean
         redirection?:

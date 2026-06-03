@@ -236,6 +236,8 @@ const { name, token } = storeToRefs(userStore);
 - 后端接口 URL 标准固定为 `/api/v{数字}/资源`，例如登录接口固定为 `POST /api/v1/login`。
 - 前端 `.env*` 的 `VITE_APP_BASE_URL` 必须写固定版本前缀，例如 `/api/v1`；升级版本时整体切到 `/api/v2`。
 - API 方法里只写版本前缀后的路径，例如 `'/login'`，禁止写未版本化的 `/api/login` 或绕过 `src/api/api.ts` 直连。
+- 动态路径参数只能出现在 URL 的最后一个片段，禁止写 `'/roles/:id/menus'` 或 `'/permissions/:key/list'`。
+- 列表查询、筛选和分页参数优先放入 `POST` 请求体。例如使用 `POST '/permissions/list'` 和 `{ parentKey: 'accountManage' }`。
 
 #### API 类定义
 ```typescript

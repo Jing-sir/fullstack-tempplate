@@ -125,7 +125,7 @@ func newRouter(cfg config.Config, h *handler.Handler, opLogRepo *repository.Oper
 			"pretreatment",    // 前端响应预处理标志
 			"deviceID",        // 前端设备标识
 		},
-		ExposeHeaders:    []string{"Content-Length"},
+		ExposeHeaders:    []string{"Content-Length", middleware.PermissionVersionHeader},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))

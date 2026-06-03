@@ -1,4 +1,5 @@
 const MANAGE_TOKEN_COOKIE_NAME = 'manageToken'
+const MANAGE_PERMISSION_VERSION_SESSION_KEY = 'managePermissionVersion'
 const COOKIE_PATH = '/'
 const AUTH_COOKIE_SAME_SITE = 'Strict'
 
@@ -25,12 +26,30 @@ const readCookie = (name: string): string => {
 
 export const getManageToken = (): string => readCookie(MANAGE_TOKEN_COOKIE_NAME)
 
+export const getManagePermissionVersion = (): string => {
+    if (typeof sessionStorage === 'undefined') return ''
+    return sessionStorage.getItem(MANAGE_PERMISSION_VERSION_SESSION_KEY) ?? ''
+}
+
+export const setManagePermissionVersion = (version = ''): void => {
+    if (typeof sessionStorage === 'undefined') return
+    if (!version) {
+        sessionStorage.removeItem(MANAGE_PERMISSION_VERSION_SESSION_KEY)
+        return
+    }
+    sessionStorage.setItem(MANAGE_PERMISSION_VERSION_SESSION_KEY, version)
+}
+
 export const setManageToken = (token = ''): void => {
+    if (getManageToken() !== token) {
+        setManagePermissionVersion('')
+    }
     writeCookie(MANAGE_TOKEN_COOKIE_NAME, token)
 }
 
 export const clearManageToken = (): void => {
     writeCookie(MANAGE_TOKEN_COOKIE_NAME, '', 0)
+    setManagePermissionVersion('')
 }
 
 export const createTraceId = (): string => {

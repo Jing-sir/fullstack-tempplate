@@ -18,10 +18,11 @@ interface OperationLogListResponse {
 
 class SysOperationLogApi extends Api {
     async fetchOperationLogList(params: OperationLogListParams) {
-        const result = await this.api.get<OperationLogListResponse, OperationLogListResponse>(
-            '/operation-logs',
-            { params },
-        );
+        const result = await this.api.post<
+            OperationLogListResponse,
+            OperationLogListResponse,
+            OperationLogListParams
+        >('/operation-logs/list', params);
         return buildTableFetchResult<OperationLogRow>({
             response: result,
             params,

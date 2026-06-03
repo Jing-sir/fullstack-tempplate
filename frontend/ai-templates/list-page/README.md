@@ -5,7 +5,7 @@
 - 页面使用 `TableSearchWrap`
 - API 继承 `Api`
 - 路由写入 `src/routes/permissionRoutes.ts`
-- 权限使用 `meta.role` + `buttonKey`
+- 权限使用 `meta.permissionKey` + `meta.permissionParent` + `buttonKey`
 - 状态列使用 `statusText`
 - UID / 编号 / 单号使用 `copyableText`，字段后面显示复制 icon，复制后提示成功/失败
 - 行操作使用 `actionButtons`
@@ -36,7 +36,7 @@ AI 替换清单：
 - `Example` / `example` / `示例` 替换为真实业务名
 - API URL 替换为真实后端路径
 - 搜索字段、表格列、按钮、弹窗字段替换为真实需求
-- `meta.role` 和 `buttonKey` 必须对齐后端权限配置
+- `meta.permissionKey`、`meta.permissionParent` 和 `${route.name}-${buttonKey}` 必须对齐后端权限配置
 - 状态枚举必须按接口或旧项目确认，不允许猜
 - UID、ID、编号、单号字段必须使用 `cellPreset: { type: 'copyableText' }`
 - 如果状态列复用已有 preset，直接改 `Index.vue` 里的 `preset`

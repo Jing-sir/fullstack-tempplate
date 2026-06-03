@@ -10,11 +10,22 @@ import (
 
 // ListAdminUsers 分页查询管理员账号列表
 func (h *Handler) ListAdminUsers(c *gin.Context) {
+	var body struct {
+		Account  string `json:"account"`
+		RealName string `json:"realName"`
+		PageNo   int    `json:"pageNo"`
+		PageSize int    `json:"pageSize"`
+	}
+	if err := bindOptionalJSON(c, &body); err != nil {
+		response.Error(c, consts.BadRequest, "参数错误")
+		return
+	}
+
 	filter := service.AdminUserFilter{
-		Account:  c.Query("account"),
-		RealName: c.Query("realName"),
-		Page:     queryInt(c, "pageNo", 1),
-		PageSize: queryInt(c, "pageSize", 20),
+		Account:  body.Account,
+		RealName: body.RealName,
+		Page:     body.PageNo,
+		PageSize: body.PageSize,
 	}
 
 	rows, total, err := h.users.ListAdminUsers(c.Request.Context(), filter)
@@ -44,7 +55,7 @@ func (h *Handler) ListAdminUsers(c *gin.Context) {
 		list = append(list, userRow{
 			UserID:        r.UID,
 			Account:       r.Username,
-			RealName:      r.Username,
+			RealName:      r.RealName,
 			RoleID:        r.RoleID,
 			RoleName:      r.RoleName,
 			State:         r.Status,
@@ -88,6 +99,9 @@ func (h *Handler) CreateOrUpdateAdminUser(c *gin.Context) {
 	}
 
 	if body.ID == "" {
+		if !h.ensureAnyPermission(c, "accountManage-add") {
+			return
+		}
 		// 新增
 		err := h.users.CreateAdminUser(c.Request.Context(), service.AdminUserCreateInput{
 			Account:  body.Account,
@@ -100,6 +114,13 @@ func (h *Handler) CreateOrUpdateAdminUser(c *gin.Context) {
 			return
 		}
 	} else {
+		requiredPermission := "accountManage-edit"
+		if body.Account == "" && body.FullName == "" && body.RoleID == "" && body.State != 0 {
+			requiredPermission = "accountManage-disable"
+		}
+		if !h.ensureAnyPermission(c, requiredPermission) {
+			return
+		}
 		// 更新
 		err := h.users.UpdateAdminUser(c.Request.Context(), service.AdminUserUpdateInput{
 			ID:       body.ID,
@@ -156,23 +177,4 @@ func (h *Handler) ResetAdminUser2FA(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{})
-}
-
-// queryInt 从 query 参数中读取整数，失败时返回默认值
-func queryInt(c *gin.Context, key string, defaultVal int) int {
-	val := c.Query(key)
-	if val == "" {
-		return defaultVal
-	}
-	n := 0
-	for _, ch := range val {
-		if ch < '0' || ch > '9' {
-			return defaultVal
-		}
-		n = n*10 + int(ch-'0')
-	}
-	if n == 0 {
-		return defaultVal
-	}
-	return n
 }

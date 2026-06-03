@@ -101,12 +101,12 @@ func (h *Handler) GetRoleInfo(c *gin.Context) {
 // AddUpdateRole 新增或更新角色（同时设置菜单权限）
 func (h *Handler) AddUpdateRole(c *gin.Context) {
 	var body struct {
-		RoleID   string `json:"roleId"`
-		RoleName string `json:"roleName" binding:"required"`
-		Remark   string `json:"remark"`
-		State    int    `json:"state"`
+		RoleID     string `json:"roleId"`
+		RoleName   string `json:"roleName" binding:"required"`
+		Remark     string `json:"remark"`
+		State      int    `json:"state"`
 		MenuIDList []struct {
-			MenuID           int64 `json:"menuId"`
+			MenuID            int64 `json:"menuId"`
 			CheckUserPassword int   `json:"checkUserPassword"`
 		} `json:"menuIdList"`
 		CheckOpPassword bool `json:"checkOpPassword"`
@@ -122,6 +122,9 @@ func (h *Handler) AddUpdateRole(c *gin.Context) {
 	}
 
 	if body.RoleID == "" {
+		if !h.ensureAnyPermission(c, "rolePermissions-add") {
+			return
+		}
 		// 新增
 		status := body.State
 		if status == 0 {
@@ -144,6 +147,9 @@ func (h *Handler) AddUpdateRole(c *gin.Context) {
 			}
 		}
 	} else {
+		if !h.ensureAnyPermission(c, "rolePermissions-edit") {
+			return
+		}
 		// 更新
 		roleIDInt, err := strconv.ParseInt(body.RoleID, 10, 64)
 		if err != nil {

@@ -23,8 +23,8 @@ type UserStore interface {
 	GetByID(ctx context.Context, id int64) (*model.AdminUser, error)
 	// UpdateTwoFASecret 更新 TOTP 密钥，同时将 two_fa_enabled 置为 false
 	UpdateTwoFASecret(ctx context.Context, userID int64, secret string) error
-	// EnableTwoFA 将 two_fa_enabled 标志置为 true
-	EnableTwoFA(ctx context.Context, userID int64) error
+	// EnableTwoFA 启用 2FA 并返回递增后的 token_version
+	EnableTwoFA(ctx context.Context, userID int64) (int, error)
 	// Update 更新管理员用户基本信息
 	Update(ctx context.Context, user model.AdminUser) error
 	// UpdatePassword 更新管理员密码

@@ -89,18 +89,21 @@ const tableColumns = computed<ColumnType[]>(() => [
             type: 'actionButtons',
             buttons: [
                 {
+                    buttonKey: 'resetPassword',
                     text: t('重置登录密码'),
                     status: 'danger',
                     onClick: (record) =>
                         handleCloseDialog(String(record.userId || ''), 'loginPwd'),
                 },
                 {
+                    buttonKey: 'reset2FA',
                     text: t('重置2FA'),
                     status: 'danger',
                     onClick: (record) =>
                         handleCloseDialog(String(record.userId || ''), '2FA'),
                 },
                 {
+                    buttonKey: 'edit',
                     text: t('编辑'),
                     disabled: (record) => Number(record.state) === 1,
                     onClick: async (record) => {

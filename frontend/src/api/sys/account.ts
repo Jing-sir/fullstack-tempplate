@@ -46,10 +46,11 @@ interface SysUserListResponse {
 
 class SysAccountApi extends Api {
     async sysUserList(params: SysUserListParams) {
-        const result = await this.api.get<SysUserListResponse, SysUserListResponse>(
-            '/admin-users',
-            { params },
-        );
+        const result = await this.api.post<
+            SysUserListResponse,
+            SysUserListResponse,
+            SysUserListParams
+        >('/admin-users/list', params);
         return buildTableFetchResult<SystemUserRow>({
             response: result,
             params,

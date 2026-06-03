@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"io"
 
 	"auth-service/internal/config"
 	"auth-service/internal/consts"
@@ -14,13 +15,13 @@ import (
 
 // Handler 聚合所有 HTTP 处理器，持有 service 层依赖和鉴权中间件
 type Handler struct {
-	users  *service.UserService          // 用户业务服务
-	ivs    *service.IVService            // IV 挑战值服务
-	perms  *service.PermissionService    // 权限查询服务（/me 接口）
-	menus  *service.MenuService          // 菜单管理服务
-	roles  *service.RoleService          // 角色管理服务
-	opLogs *service.OperationLogService  // 操作日志服务
-	auth   gin.HandlerFunc               // JWT 鉴权中间件
+	users  *service.UserService         // 用户业务服务
+	ivs    *service.IVService           // IV 挑战值服务
+	perms  *service.PermissionService   // 权限查询服务（/me 接口）
+	menus  *service.MenuService         // 菜单管理服务
+	roles  *service.RoleService         // 角色管理服务
+	opLogs *service.OperationLogService // 操作日志服务
+	auth   gin.HandlerFunc              // JWT 鉴权中间件
 }
 
 // New 构造 Handler，注入依赖
@@ -40,18 +41,17 @@ func New(
 		menus:  menus,
 		roles:  roles,
 		opLogs: opLogs,
-		auth:   middleware.AuthMiddleware(jwt),
+		auth:   middleware.AuthMiddleware(jwt, users),
 	}
 }
 
 // RegisterRoutes 注册所有路由。
-// 公开路由：/api/v1/login、/api/v1/users（注册）、/api/v1/security/iv
-// 鉴权路由：/api/v1/userInfo、/api/v1/menus、/api/v1/roles、/api/v1/admin-users、/api/v1/user/2fa/*
+// 公开路由：/api/v1/login、/api/v1/security/iv
+// 鉴权路由：除身份与当前权限查询外，业务接口还会继续校验明确的权限 key
 func RegisterRoutes(r *gin.Engine, h *Handler, opLogMiddleware gin.HandlerFunc) {
 	api := r.Group("/api/v1")
 	{
 		api.POST("/login", h.Login)
-		api.POST("/users", h.CreateUser)
 		api.GET("/security/iv", h.GetIV)
 
 		// 以下路由需要携带有效 JWT
@@ -63,42 +63,68 @@ func RegisterRoutes(r *gin.Engine, h *Handler, opLogMiddleware gin.HandlerFunc) 
 		{
 			// 当前用户信息与权限菜单
 			auth.GET("/userInfo", h.GetMe)
+			auth.POST("/menus/list", h.ListMenus)
+			auth.POST("/permissions/list", h.ListPagePermissions)
 
 			// 用户管理
-			auth.GET("/users", h.GetUsers)
+			auth.POST("/users", h.requireAny("accountManage-add"), h.CreateUser)
+			auth.POST("/users/list", h.requireAny("accountManage"), h.GetUsers)
 			auth.GET("/user/2fa/setup", h.TwoFASetup)
 			auth.POST("/user/2fa/verify", h.TwoFAVerify)
 
-			// 菜单：GET /menus 返回当前用户权限菜单树（侧栏用）
-			// GET /admin/menus 返回全量菜单树（菜单管理页用）
-			auth.GET("/menus", h.ListMenus)
-			auth.GET("/admin/menus", h.ListAllMenus)
-			auth.POST("/admin/menus", h.CreateMenu)
-			auth.PUT("/admin/menus/:id", h.UpdateMenu)
-			auth.DELETE("/admin/menus/:id", h.DeleteMenu)
+			// 菜单管理：全量树供角色权限页读取，写接口仅开放给菜单管理员
+			auth.POST("/admin/menus/list", h.requireAny("rolePermissions-add", "rolePermissions-view", "rolePermissions-edit"), h.ListAllMenus)
+			auth.POST("/admin/menus", h.requireAny("rolePermissions-menuManage"), h.CreateMenu)
+			auth.PUT("/admin/menus/:id", h.requireAny("rolePermissions-menuManage"), h.UpdateMenu)
+			auth.DELETE("/admin/menus/:id", h.requireAny("rolePermissions-menuManage"), h.DeleteMenu)
 
 			// 角色管理
-			auth.GET("/roles", h.ListRoles)
-			auth.POST("/roles", h.CreateRole)
-			auth.PUT("/roles/:id", h.UpdateRole)
-			auth.DELETE("/roles/:id", h.DeleteRole)
-			auth.GET("/roles/:id/menus", h.GetRoleMenus)
-			auth.PUT("/roles/:id/menus", h.SetRoleMenus)
+			auth.POST("/roles/list", h.requireAny("rolePermissions", "accountManage"), h.ListRoles)
+			auth.POST("/roles", h.requireAny("rolePermissions-add"), h.CreateRole)
+			auth.PUT("/roles/:id", h.requireAny("rolePermissions-edit"), h.UpdateRole)
+			auth.DELETE("/roles/:id", h.requireAny("rolePermissions-delete"), h.DeleteRole)
+			auth.GET("/roles/menus/:id", h.requireAny("rolePermissions-view", "rolePermissions-edit"), h.GetRoleMenus)
+			auth.PUT("/roles/menus/:id", h.requireAny("rolePermissions-edit"), h.SetRoleMenus)
 			// 前端 sysRoleApi 扩展接口
-			auth.GET("/roles/:id/info", h.GetRoleInfo)
+			auth.GET("/roles/info/:id", h.requireAny("rolePermissions-view", "rolePermissions-edit"), h.GetRoleInfo)
 			auth.POST("/roles/add-update", h.AddUpdateRole)
 
 			// 管理员账号管理
-			auth.GET("/admin-users", h.ListAdminUsers)
-			auth.GET("/admin-users/detail", h.GetAdminUserDetail)
+			auth.POST("/admin-users/list", h.requireAny("accountManage"), h.ListAdminUsers)
+			auth.GET("/admin-users/detail", h.requireAny("accountManage-edit"), h.GetAdminUserDetail)
 			auth.POST("/admin-users", h.CreateOrUpdateAdminUser)
-			auth.POST("/admin-users/reset-password", h.ResetAdminUserPassword)
-			auth.POST("/admin-users/reset-2fa", h.ResetAdminUser2FA)
+			auth.POST("/admin-users/reset-password", h.requireAny("accountManage-resetPassword"), h.ResetAdminUserPassword)
+			auth.POST("/admin-users/reset-2fa", h.requireAny("accountManage-reset2FA"), h.ResetAdminUser2FA)
 
 			// 操作日志
-			auth.GET("/operation-logs", h.ListOperationLogs)
+			auth.POST("/operation-logs/list", h.requireAny("operationLog"), h.ListOperationLogs)
 		}
 	}
+}
+
+func (h *Handler) requireAny(permissionKeys ...string) gin.HandlerFunc {
+	return middleware.RequireAnyPermission(h.perms, permissionKeys...)
+}
+
+func bindOptionalJSON(c *gin.Context, body any) error {
+	err := c.ShouldBindJSON(body)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	return err
+}
+
+func (h *Handler) ensureAnyPermission(c *gin.Context, permissionKeys ...string) bool {
+	ok, err := h.perms.HasAnyPermission(c.Request.Context(), middleware.GetAdminUserID(c), permissionKeys...)
+	if err != nil {
+		response.Error(c, consts.InternalServerError, "系统内部错误")
+		return false
+	}
+	if !ok {
+		response.Error(c, consts.Forbidden, "权限不足")
+		return false
+	}
+	return true
 }
 
 // Login 处理用户登录，支持密码加密传输和 2FA 验证
@@ -218,6 +244,13 @@ func writeServiceError(c *gin.Context, err error) {
 		response.Error(c, consts.NotFound, "角色不存在")
 	case errors.Is(err, service.ErrMenuNotFound):
 		response.Error(c, consts.NotFound, "菜单不存在")
+	case errors.Is(err, service.ErrPermissionDenied):
+		response.Error(c, consts.Forbidden, "权限不足")
+	case errors.Is(err, service.ErrMenuTypeInvalid),
+		errors.Is(err, service.ErrMenuParentInvalid),
+		errors.Is(err, service.ErrMenuHiddenNeedPage),
+		errors.Is(err, service.ErrMenuButtonNeedParent):
+		response.Error(c, consts.BadRequest, err.Error())
 	default:
 		response.Error(c, consts.InternalServerError, "系统内部错误")
 	}

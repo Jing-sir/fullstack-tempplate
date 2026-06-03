@@ -19,7 +19,7 @@ const fulfillOk = (route: Route, data: unknown) => route.fulfill(json({ code: 20
  */
 export async function mockBootstrapApis(page: Page) {
     await page.route('**/api/v1/security/iv**', (route) =>
-        fulfillOk(route, { iv_id: 'mock-iv-id', iv: 'mock-pwd-iv' }),
+        fulfillOk(route, { iv_id: 'mock-iv-id', iv: '00112233445566778899aabb' }),
     )
 
     await page.route('**/api/v1/users**', (route) =>

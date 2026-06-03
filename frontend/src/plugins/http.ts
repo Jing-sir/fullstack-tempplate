@@ -12,7 +12,13 @@ import { Message } from '@arco-design/web-vue'
 import { getI18nLanguage } from '@/setup/i18n-setup'
 import router from '../setup/router-setup'
 import { timeStampToDate } from '@/filters/dateFormat'
-import { clearManageToken, createTraceId, getManageToken } from '@/utils/session'
+import {
+    clearManageToken,
+    createTraceId,
+    getManagePermissionVersion,
+    getManageToken,
+    setManagePermissionVersion,
+} from '@/utils/session'
 
 export type { AxiosInstance }
 
@@ -65,6 +71,8 @@ const toFormData = (data: unknown): FormData => {
 }
 
 let isRedirectingToLogin = false
+let permissionRefreshPromise: Promise<void> | null = null
+const PERMISSION_VERSION_HEADER = 'x-permission-version'
 
 const redirectToLogin = async (): Promise<void> => {
     clearManageToken()
@@ -76,6 +84,34 @@ const redirectToLogin = async (): Promise<void> => {
     await router.replace(`/login?redirect=${encodeURIComponent(redirect)}`).finally(() => {
         isRedirectingToLogin = false
     })
+}
+
+const refreshPermissionStore = (): Promise<void> => {
+    if (permissionRefreshPromise) return permissionRefreshPromise
+
+    const request = Promise.all([import('@/store/sideBar'), import('@/store/Index')])
+        .then(([{ default: useSidebar }, { default: pinia }]) =>
+            useSidebar(pinia).refreshPermissions(),
+        )
+        .finally(() => {
+            permissionRefreshPromise = null
+        })
+
+    permissionRefreshPromise = request
+    return request
+}
+
+const syncPermissionVersion = async (response?: AxiosResponse): Promise<void> => {
+    const nextVersion = String(response?.headers?.[PERMISSION_VERSION_HEADER] ?? '').trim()
+    if (!nextVersion || !getManageToken()) return
+
+    const previousVersion = getManagePermissionVersion()
+    setManagePermissionVersion(nextVersion)
+    if (!previousVersion || previousVersion === nextVersion) return
+
+    // 当前响应本身就是最新菜单时，Store 会直接消费它，无需再次发起菜单请求。
+    if (String(response?.config.url ?? '').endsWith('/menus/list')) return
+    await refreshPermissionStore()
 }
 
 function httpInit(instance: AxiosInstance): AxiosInstance {
@@ -134,6 +170,7 @@ function httpInit(instance: AxiosInstance): AxiosInstance {
                 data,
                 config: { headers },
             } = response
+            await syncPermissionVersion(response)
             // const cryptoKey =  await generateKey(String(url));
             // const cryptoIv =  await generateIv(await generateKey(String(url), false));
 
@@ -157,16 +194,21 @@ function httpInit(instance: AxiosInstance): AxiosInstance {
             if (errorMessage) Message.error(errorMessage)
             return Promise.reject(errorMessage || responseData)
         },
-        (error) => {
+        async (error) => {
             if (error?.code === 'ERR_CANCELED') {
                 return Promise.reject(error)
             }
 
             const { response } = error
+            await syncPermissionVersion(response)
             const rawMessage = response?.data?.msg ?? response?.data?.message ?? error?.message
             const errorMessage = rawMessage ? String(rawMessage) : ''
 
-            if ([401, 403].includes(Number(response?.status))) {
+            // 普通 403 仅表示权限不足；强制绑定 2FA 是升级期特例，需要回收旧登录态。
+            const shouldRedirectToLogin =
+                Number(response?.status) === 401 ||
+                (Number(response?.status) === 403 && errorMessage === '请先完成 2FA 绑定')
+            if (shouldRedirectToLogin) {
                 void redirectToLogin()
             }
 

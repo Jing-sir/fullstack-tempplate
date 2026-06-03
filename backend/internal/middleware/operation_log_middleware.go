@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"auth-service/internal/model"
@@ -55,13 +56,9 @@ func OperationLogMiddleware(repo *repository.OperationLogRepository) gin.Handler
 			errMsg = c.Errors.String()
 		}
 
-		// 限制存储长度，避免超大报文撑爆数据库
-		reqDataStr := truncate(string(reqBody), 4096)
-		respDataStr := truncate(blw.body.String(), 4096)
-
-		// 尝试压缩 JSON（去掉空白），存储更紧凑
-		reqDataStr = compactJSON(reqDataStr)
-		respDataStr = compactJSON(respDataStr)
+		// 先递归脱敏再截断，避免密码、token、TOTP 密钥或验证码进入数据库
+		reqDataStr := truncate(sanitizeJSON(reqBody), 4096)
+		respDataStr := truncate(sanitizeJSON(blw.body.Bytes()), 4096)
 
 		clientIP := c.ClientIP()
 
@@ -94,10 +91,57 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen]
 }
 
-func compactJSON(s string) string {
-	var buf bytes.Buffer
-	if err := json.Compact(&buf, []byte(s)); err != nil {
-		return s
+func sanitizeJSON(body []byte) string {
+	if len(body) == 0 {
+		return ""
 	}
-	return buf.String()
+
+	var value any
+	if err := json.Unmarshal(body, &value); err != nil {
+		return "[非 JSON 请求体已省略]"
+	}
+	redactSensitiveFields(value)
+
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return "[JSON 序列化失败]"
+	}
+	return strings.TrimSpace(buf.String())
+}
+
+func redactSensitiveFields(value any) {
+	switch current := value.(type) {
+	case map[string]any:
+		for key, child := range current {
+			if isSensitiveField(key, child) {
+				current[key] = "[REDACTED]"
+				continue
+			}
+			redactSensitiveFields(child)
+		}
+	case []any:
+		for _, child := range current {
+			redactSensitiveFields(child)
+		}
+	}
+}
+
+func isSensitiveField(key string, value any) bool {
+	normalized := strings.ToLower(strings.ReplaceAll(key, "_", ""))
+	if strings.Contains(normalized, "password") ||
+		strings.Contains(normalized, "token") ||
+		strings.Contains(normalized, "secret") ||
+		normalized == "facode" ||
+		normalized == "otpauthurl" {
+		return true
+	}
+	// TOTP 校验接口常使用 code 字段；数字业务响应码保留，字符串验证码一律脱敏。
+	return normalized == "code" && isString(value)
+}
+
+func isString(value any) bool {
+	_, ok := value.(string)
+	return ok
 }

@@ -67,14 +67,6 @@ const currentModule = computed(() =>
     rootRoleList.value.find((item) => String(item.menuId) === currentModuleKey.value) ?? null,
 );
 
-// 递归收集节点下所有 type=3 后代的 menuId key。
-// 用于 type=2 勾选/取消勾选时自动联动其隐藏路由页子节点。
-const collectHiddenDescendants = (nodes: TreeDataType[]): string[] =>
-    nodes.flatMap((node) => {
-        const descendants = collectHiddenDescendants(node.children ?? []);
-        return node.type === 3 ? [String(node.menuId), ...descendants] : descendants;
-    });
-
 // 将整棵权限树拍平成”可搜索、可分组、可回跳”的索引。
 // 右侧已选权限清单不会再直接遍历树，而是基于这个索引做筛选和聚合。
 const flattenPermissionTree = (
@@ -108,11 +100,9 @@ const permissionSummary = computed(() =>
 );
 
 // 右侧清单和顶部统计都建立在”已选索引”上，避免直接操作树节点。
-// type=3 隐藏路由页不在清单中展示（对管理员无业务语义，由 type=2 联动控制）。
+// 隐藏页面、Tab 和按钮都是独立授权项，因此需要完整展示。
 const selectedPermissionList = computed(() =>
-    permissionSummary.value.filter(
-        (item) => checkedKeySet.value.has(item.key) && item.type !== 3,
-    ),
+    permissionSummary.value.filter((item) => checkedKeySet.value.has(item.key)),
 );
 
 // 左侧模块角标直接复用已选索引聚合结果。
@@ -182,9 +172,8 @@ const readonlyTreeData = computed<TreeDataType[]>(() => {
     const markReadonly = (nodes: TreeDataType[]): TreeDataType[] =>
         nodes.map((node) => ({
             ...node,
-            // type=3 隐藏路由页始终禁用 checkbox（跟随父级 type=2 联动，不可单独操作）；
-            // 查看模式下所有节点也锁定交互。
-            disableCheckbox: node.type === 3 || see.value,
+            // 查看模式下所有节点锁定交互；编辑模式下全部可操作。
+            disableCheckbox: see.value,
             children: markReadonly(node.children ?? []),
         }));
 
@@ -257,9 +246,10 @@ const fetchRoleList = async (): Promise<void> => {
     }
 };
 
-// 编辑/查看场景需要把“角色基本信息”和“已勾选权限”分别回填到表单状态。
+// 编辑/查看场景需要把”角色基本信息”和”已勾选权限”分别回填到表单状态。
 const fetchRoleListDetail = (): void => {
     sysRoleApi.sysInfoCheckMenuList({ roleId: currState.roleId }).then((data) => {
+        // check-strictly 模式下父子状态独立展示，直接回填后端已保存的完整祖先闭包。
         currState.checkedKeys = data.map((item) => String(item.menuId));
     });
 
@@ -296,70 +286,16 @@ const handleSaveData = async (): Promise<void> => {
         roleName: currState.roleName,
         roleId: currState.roleId || undefined,
     })
-        .then(() => {
+        .then(async () => {
+            await sidebarStore.refreshPermissions();
             Message.success(t('操作成功'));
             handleBack();
-            sidebarStore.fetchSidebarRoutes();
         })
         .finally(() => {
             isLoading.value = false;
             isSpinning.value = false;
         });
 };
-
-// type=2 菜单页勾选/取消勾选时，自动联动其下所有 type=3 隐藏路由页子节点。
-// 使用独立的 isLinkingHidden flag 避免联动赋值触发 watch 循环。
-const isLinkingHidden = ref(false);
-watch(
-    () => [...currState.checkedKeys],
-    (newKeys, oldKeys) => {
-        if (isLinkingHidden.value) return;
-
-        const newSet = new Set(newKeys);
-        const oldSet = new Set(oldKeys);
-
-        // 找出本次新增和移除的 key
-        const added = newKeys.filter((k) => !oldSet.has(k));
-        const removed = (oldKeys ?? []).filter((k) => !newSet.has(k));
-
-        // 在完整权限树（allRoleList）中找对应节点
-        const findNode = (nodes: TreeDataType[], key: string): TreeDataType | null => {
-            for (const node of nodes) {
-                if (String(node.menuId) === key) return node;
-                const found = findNode(node.children ?? [], key);
-                if (found) return found;
-            }
-            return null;
-        };
-
-        const toAdd: string[] = [];
-        const toRemove: string[] = [];
-
-        for (const key of added) {
-            const node = findNode(allRoleList.value, key);
-            if (node?.type === 2) {
-                toAdd.push(...collectHiddenDescendants(node.children ?? []));
-            }
-        }
-        for (const key of removed) {
-            const node = findNode(allRoleList.value, key);
-            if (node?.type === 2) {
-                toRemove.push(...collectHiddenDescendants(node.children ?? []));
-            }
-        }
-
-        if (!toAdd.length && !toRemove.length) return;
-
-        isLinkingHidden.value = true;
-        const merged = [...new Set([...newKeys, ...toAdd])].filter(
-            (k) => !toRemove.includes(k),
-        );
-        currState.checkedKeys = merged;
-        nextTick(() => {
-            isLinkingHidden.value = false;
-        });
-    },
-);
 
 // 模块列表一旦准备好，默认自动聚焦第一个模块，保证中间树面板始终有内容。
 watch(
@@ -538,6 +474,7 @@ onMounted(async () => {
                                 :field-names="{ children: 'children', title: 'menuName', key: 'menuId' }"
                                 size="small"
                                 checkable
+                                check-strictly
                                 @expand="handleExpand"
                             />
                             <a-empty

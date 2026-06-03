@@ -10,7 +10,7 @@ import (
 type Response[T any] struct {
 	Code int    `json:"code"`
 	Msg  string `json:"msg"`
-	Data T      `json:"data,omitempty"`
+	Data T      `json:"data"`
 }
 
 // Success 返回业务成功响应，HTTP 状态码固定为 200

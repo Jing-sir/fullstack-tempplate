@@ -234,6 +234,21 @@ func NewUserService(...) UserService { return UserService{...} }
 - 所有公开 HTTP 端点必须带版本前缀，当前版本 `/api/v1`
 - 登录接口固定为 `POST /api/v1/login`
 - 重大不兼容变更升版本号（`/api/v2`），旧版本保留至少 6 个月
+- 动态路径参数只能出现在 URL 的最后一个片段，禁止放在 URL 中间
+- 列表查询、筛选和分页参数优先放在 `POST` 请求体中
+
+```text
+# ❌ 禁止：参数位于 URL 中间
+GET  /api/v1/roles/:id/info
+GET  /api/v1/roles/:id/menus
+POST /api/v1/permissions/:key/list
+
+# ✅ 正确：参数位于 URL 结尾，或列表筛选参数进入 POST body
+GET  /api/v1/roles/info/:id
+GET  /api/v1/roles/menus/:id
+POST /api/v1/permissions/list
+Body: { "parentKey": "accountManage" }
+```
 
 ### 统一响应结构
 

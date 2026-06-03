@@ -56,7 +56,7 @@ AI 不能凭感觉写：
 
 - 接口 URL、请求方式、参数名、返回字段。
 - 状态枚举值，例如 `0/1/2` 分别代表什么。
-- 权限字段，例如 `meta.role`、按钮 `buttonKey`。
+- 权限字段，例如 `meta.permissionKey`、`meta.permissionParent`、按钮 `buttonKey`。
 - 路由 `name` 和后端菜单权限的对应关系。
 - 旧项目迁移时的搜索字段、表格列、按钮、弹窗、接口。
 - 金额、数量、ID、时间字段的特殊展示规则。
@@ -161,7 +161,8 @@ AI 不能凭感觉写：
 - path：
 - name：
 - meta.title：
-- meta.role：
+- meta.permissionKey：
+- meta.permissionParent：
 - 顶级菜单 icon：
 
 接口信息：
@@ -221,7 +222,8 @@ API 信息（没有就写无）：
 - name：
 - component：
 - meta.title：
-- meta.role：
+- meta.permissionKey：
+- meta.permissionParent：
 - 顶级菜单 icon：
 
 验收标准：

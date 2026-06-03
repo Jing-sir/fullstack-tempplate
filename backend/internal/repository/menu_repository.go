@@ -153,9 +153,19 @@ func (r *MenuRepository) Update(ctx context.Context, m model.Menu) error {
 	return nil
 }
 
-// Delete 删除菜单（级联删除通过数据库外键约束处理）
+// Delete 删除菜单及全部后代节点。menus.parent_id 使用 0 表示根节点，
+// 因此层级级联由递归 CTE 显式完成，role_menus 再由外键自动清理。
 func (r *MenuRepository) Delete(ctx context.Context, id int64) error {
-	_, err := r.db.ExecContext(ctx, "DELETE FROM menus WHERE id=$1", id)
+	_, err := r.db.ExecContext(ctx, `
+		WITH RECURSIVE descendants AS (
+			SELECT id FROM menus WHERE id = $1
+			UNION
+			SELECT m.id
+			FROM menus m
+			INNER JOIN descendants d ON m.parent_id = d.id
+		)
+		DELETE FROM menus WHERE id IN (SELECT id FROM descendants)
+	`, id)
 	if err != nil {
 		return fmt.Errorf("delete menu: %w", err)
 	}
