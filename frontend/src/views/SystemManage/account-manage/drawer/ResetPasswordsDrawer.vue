@@ -3,6 +3,7 @@ import type { FieldRule, FormInstance } from '@arco-design/web-vue'
 import { Message } from '@arco-design/web-vue'
 import sysAccountApi from '@/api/sys/account'
 import useCurrentUserSecurity from '@/use/useCurrentUserSecurity'
+import GoogleCode from '@/components/GoogleCode.vue'
 
 const { t } = useI18n()
 const userStore = user()
@@ -25,9 +26,10 @@ const emit = defineEmits<{
 }>()
 
 const formRef = ref<FormInstance>()
+const googleCodeRef = ref<InstanceType<typeof GoogleCode> | null>(null)
+const isGoogleCodeMounted = shallowRef(false)
 const isSubmitLoading = ref(false)
 const formState = reactive({
-    facode: '',
     password: '',
 })
 
@@ -39,20 +41,17 @@ const visibleProxy = computed({
 })
 
 const formRules: Record<string, FieldRule[]> = {
-    facode: [
-        { required: true, message: t('请输入6位数字验证码') },
-        { match: /^\d{6}$/, message: t('请输入6位数字验证码') },
-    ],
     password: [{ required: true, message: t('请输入'), trigger: 'blur' }],
 }
 
 const resetForm = (): void => {
-    formState.facode = ''
     formState.password = ''
     formRef.value?.resetFields()
 }
 
 const handCancel = (): void => {
+    googleCodeRef.value?.closeDialog()
+    isGoogleCodeMounted.value = false
     userStore.getUserInfo()
     resetForm()
     visibleProxy.value = false
@@ -63,30 +62,34 @@ const handCancel = (): void => {
  * - 通过 props.type 显式分支具体接口，避免动态下标调用带来的类型丢失
  * - 提交 loading 统一在 finally 里收口，确保异常分支也能恢复按钮状态
  */
-const handleAddOrUpdate = async (): Promise<void> => {
+const handleAddOrUpdate = async (facode: string): Promise<void> => {
     if (isSubmitLoading.value) return
 
     isSubmitLoading.value = true
 
     try {
-        const password = await encryptCurrentUserPassword(formState.password)
+        const { password } = await encryptCurrentUserPassword(formState.password)
 
         if (props.type === 'loginPwd') {
             await sysAccountApi.sysUserResetPassword({
-                ...formState,
+                facode,
                 password,
                 userId: props.userId,
                 type: 1,
             })
         } else {
             await sysAccountApi.setSysUserResetSecret({
-                ...formState,
+                facode,
                 password,
                 userId: props.userId,
             })
         }
 
         Message.success(t('操作成功'))
+        googleCodeRef.value?.closeDialog()
+        isGoogleCodeMounted.value = false
+        handCancel()
+        emit('onSuccess')
     } finally {
         isSubmitLoading.value = false
     }
@@ -96,9 +99,9 @@ const handleSubmit = async (): Promise<void> => {
     const errors = await formRef.value?.validate()
     if (errors) return
 
-    await handleAddOrUpdate()
-    handCancel()
-    emit('onSuccess')
+    isGoogleCodeMounted.value = true
+    await nextTick()
+    await googleCodeRef.value?.onShowDialog(true)
 }
 </script>
 
@@ -126,13 +129,14 @@ const handleSubmit = async (): Promise<void> => {
                     :placeholder="t('请输入')"
                 />
             </a-form-item>
-            <a-form-item :label="t('2FA验证')" field="facode">
-                <a-input-password
-                    v-model="formState.facode"
-                    size="small"
-                    :placeholder="t('请输入')"
-                />
-            </a-form-item>
         </a-form>
     </a-drawer>
+
+    <GoogleCode
+        v-if="isGoogleCodeMounted"
+        ref="googleCodeRef"
+        :loading="isSubmitLoading"
+        @set-code="handleAddOrUpdate"
+        @cancel="isGoogleCodeMounted = false"
+    />
 </template>

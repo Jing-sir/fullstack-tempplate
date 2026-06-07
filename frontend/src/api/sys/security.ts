@@ -3,6 +3,7 @@ import { Api } from '../api';
 interface CheckCipherParams {
     password: string;
     userId: string;
+    iv_id?: string;
 }
 
 class SysSecurityApi extends Api {

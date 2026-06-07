@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -24,6 +26,7 @@ var (
 	ErrInvalidTwoFACode   = errors.New("2FA 验证码无效")
 	ErrInvalidIV          = errors.New("IV 无效或已过期")
 	ErrTwoFAAlreadyBound  = errors.New("2FA 已绑定")
+	ErrTwoFANotBound      = errors.New("当前账号未绑定 2FA")
 )
 
 // CreateUserInput 创建用户的请求参数
@@ -56,9 +59,28 @@ type TwoFASetupResult struct {
 	Secret     string `json:"secret"`
 }
 
+// PasswordCheckInput 当前用户安全操作前置校验参数
+type PasswordCheckInput struct {
+	Password string `json:"password" binding:"required"`
+	UserID   string `json:"userId"`
+	FACode   string `json:"facode"`
+	IVID     string `json:"iv_id"`
+}
+
+// UpdateCurrentPasswordInput 当前用户修改登录密码参数
+type UpdateCurrentPasswordInput struct {
+	OldPassword string `json:"oldPassword" binding:"required"`
+	Password    string `json:"password"    binding:"required"`
+	FACode      string `json:"facode"      binding:"required"`
+	IVID        string `json:"iv_id"`
+	NewIVID     string `json:"new_iv_id"`
+	Type        int    `json:"type"`
+}
+
 // UserService 负责用户相关业务逻辑，包括注册、登录、2FA 绑定与验证
 type UserService struct {
 	users             UserStore          // 用户数据访问接口
+	roles             RoleStore          // 角色数据访问接口，用于种子账号授权
 	iv                passwordIVStore    // IV 挑战值服务，用于密码传输加密
 	jwt               *config.JWTManager // JWT 签发与解析
 	passwordCryptoKey string             // AES-GCM 密码解密密钥
@@ -71,9 +93,10 @@ type passwordIVStore interface {
 }
 
 // NewUserService 构造 UserService，所有依赖通过参数注入
-func NewUserService(users UserStore, iv passwordIVStore, jwt *config.JWTManager, passwordCryptoKey, twoFAIssuer string) *UserService {
+func NewUserService(users UserStore, roles RoleStore, iv passwordIVStore, jwt *config.JWTManager, passwordCryptoKey, twoFAIssuer string) *UserService {
 	return &UserService{
 		users:             users,
+		roles:             roles,
 		iv:                iv,
 		jwt:               jwt,
 		passwordCryptoKey: passwordCryptoKey,
@@ -106,6 +129,9 @@ func (s *UserService) CreateUser(ctx context.Context, input CreateUserInput) (mo
 		Status:   1,
 	}
 	if err := s.users.Create(ctx, user); err != nil {
+		if errors.Is(err, repository.ErrDuplicateKey) {
+			return model.PublicAdminUser{}, ErrUserExists
+		}
 		return model.PublicAdminUser{}, fmt.Errorf("create user: %w", err)
 	}
 
@@ -209,6 +235,23 @@ func (s *UserService) SetupTwoFA(ctx context.Context, uid string) (TwoFASetupRes
 		return TwoFASetupResult{}, ErrTwoFAAlreadyBound
 	}
 
+	return s.saveTwoFASecret(ctx, user)
+}
+
+// SetupReplacementTwoFA 校验当前密码和旧 2FA 后生成新的 TOTP 密钥
+func (s *UserService) SetupReplacementTwoFA(ctx context.Context, uid string, input PasswordCheckInput) (TwoFASetupResult, error) {
+	user, err := s.getCurrentUserForSecurity(ctx, uid, input.UserID)
+	if err != nil {
+		return TwoFASetupResult{}, err
+	}
+	if err := s.checkPasswordAndTwoFA(ctx, user, PasswordCheckInput{Password: input.Password, FACode: input.FACode, IVID: input.IVID}); err != nil {
+		return TwoFASetupResult{}, err
+	}
+
+	return s.saveTwoFASecret(ctx, user)
+}
+
+func (s *UserService) saveTwoFASecret(ctx context.Context, user *model.AdminUser) (TwoFASetupResult, error) {
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      s.twoFAIssuer,
 		AccountName: user.Username,
@@ -259,6 +302,60 @@ func (s *UserService) VerifyTwoFA(ctx context.Context, uid, code string) (LoginR
 	}, nil
 }
 
+// CheckCurrentUserPassword 校验当前登录用户的登录密码
+func (s *UserService) CheckCurrentUserPassword(ctx context.Context, uid string, input PasswordCheckInput) error {
+	user, err := s.getCurrentUserForSecurity(ctx, uid, input.UserID)
+	if err != nil {
+		return err
+	}
+	return s.checkPassword(ctx, user, input)
+}
+
+// CheckCurrentUserPasswordAndTwoFA 校验当前登录用户的登录密码和当前 2FA 验证码
+func (s *UserService) CheckCurrentUserPasswordAndTwoFA(ctx context.Context, uid string, input PasswordCheckInput) error {
+	user, err := s.getCurrentUserForSecurity(ctx, uid, input.UserID)
+	if err != nil {
+		return err
+	}
+	return s.checkPasswordAndTwoFA(ctx, user, input)
+}
+
+// ValidateCurrentTwoFA 校验当前登录管理员的 2FA 验证码，不要求再次输入登录密码
+func (s *UserService) ValidateCurrentTwoFA(ctx context.Context, adminUserID int64, code string) error {
+	user, err := s.users.GetByID(ctx, adminUserID)
+	if err != nil {
+		return fmt.Errorf("get current user: %w", err)
+	}
+	if user == nil {
+		return ErrUserNotFound
+	}
+	return s.checkTwoFA(user, code)
+}
+
+// UpdateCurrentUserPassword 校验旧密码和 2FA 后修改当前登录用户密码
+func (s *UserService) UpdateCurrentUserPassword(ctx context.Context, uid string, input UpdateCurrentPasswordInput) error {
+	user, err := s.getCurrentUserForSecurity(ctx, uid, "")
+	if err != nil {
+		return err
+	}
+	if err := s.checkPasswordAndTwoFA(ctx, user, PasswordCheckInput{Password: input.OldPassword, FACode: input.FACode, IVID: input.IVID}); err != nil {
+		return err
+	}
+
+	plainPassword, err := s.currentUserPlainPasswordByIVID(ctx, user.UID, input.Password, input.NewIVID)
+	if err != nil {
+		return err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(plainPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+	if err := s.users.UpdatePassword(ctx, user.ID, string(hash)); err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+	return nil
+}
+
 // GetUserByUID 按 UID 查询管理员用户，不存在时返回 ErrUserNotFound
 func (s *UserService) GetUserByUID(ctx context.Context, uid string) (*model.AdminUser, error) {
 	user, err := s.users.GetByUID(ctx, uid)
@@ -278,28 +375,49 @@ func (s *UserService) EnsureSeedUser(ctx context.Context, username, password str
 		return nil
 	}
 
-	count, err := s.users.CountByUsername(ctx, username)
+	user, err := s.users.GetByUsername(ctx, username)
 	if err != nil {
-		return fmt.Errorf("check seed user: %w", err)
+		return fmt.Errorf("get seed user: %w", err)
 	}
-	if count > 0 {
-		// 种子用户已存在，无需重复创建
+	if user == nil {
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("hash seed password: %w", err)
+		}
+
+		if err := s.users.Create(ctx, model.AdminUser{
+			UID:      uuid.NewString(),
+			Username: username,
+			RealName: username,
+			Password: string(hash),
+			Status:   1,
+		}); err != nil {
+			if !errors.Is(err, repository.ErrDuplicateKey) {
+				return fmt.Errorf("create seed user: %w", err)
+			}
+		}
+
+		user, err = s.users.GetByUsername(ctx, username)
+		if err != nil {
+			return fmt.Errorf("get created seed user: %w", err)
+		}
+		if user == nil {
+			return ErrUserNotFound
+		}
+	}
+
+	if s.roles == nil {
 		return nil
 	}
-
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	role, err := s.roles.GetByName(ctx, "superadmin")
 	if err != nil {
-		return fmt.Errorf("hash seed password: %w", err)
+		return fmt.Errorf("get superadmin role: %w", err)
 	}
-
-	if err := s.users.Create(ctx, model.AdminUser{
-		UID:      uuid.NewString(),
-		Username: username,
-		RealName: username,
-		Password: string(hash),
-		Status:   1,
-	}); err != nil {
-		return fmt.Errorf("create seed user: %w", err)
+	if role == nil {
+		return nil
+	}
+	if err := s.users.SetRole(ctx, user.ID, role.ID); err != nil {
+		return fmt.Errorf("bind seed role: %w", err)
 	}
 	return nil
 }
@@ -399,6 +517,9 @@ func (s *UserService) CreateAdminUser(ctx context.Context, input AdminUserCreate
 		Status:   state,
 	}
 	if err := s.users.Create(ctx, newUser); err != nil {
+		if errors.Is(err, repository.ErrDuplicateKey) {
+			return ErrUserExists
+		}
 		return fmt.Errorf("create user: %w", err)
 	}
 
@@ -440,6 +561,9 @@ func (s *UserService) UpdateAdminUser(ctx context.Context, input AdminUserUpdate
 	}
 
 	if err := s.users.Update(ctx, *user); err != nil {
+		if errors.Is(err, repository.ErrDuplicateKey) {
+			return ErrUserExists
+		}
 		return fmt.Errorf("update user: %w", err)
 	}
 
@@ -486,6 +610,71 @@ func (s *UserService) ResetAdminUser2FA(ctx context.Context, targetUID string) e
 		return ErrUserNotFound
 	}
 	return s.users.ResetTwoFA(ctx, user.ID)
+}
+
+func (s *UserService) getCurrentUserForSecurity(ctx context.Context, uid, requestedUID string) (*model.AdminUser, error) {
+	if uid == "" {
+		return nil, ErrUserNotFound
+	}
+	user, err := s.users.GetByUID(ctx, uid)
+	if err != nil {
+		return nil, fmt.Errorf("get current user: %w", err)
+	}
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+	if requestedUID != "" && requestedUID != user.UID {
+		return nil, ErrPermissionDenied
+	}
+	return user, nil
+}
+
+func (s *UserService) checkPasswordAndTwoFA(ctx context.Context, user *model.AdminUser, input PasswordCheckInput) error {
+	if err := s.checkPassword(ctx, user, input); err != nil {
+		return err
+	}
+	return s.checkTwoFA(user, input.FACode)
+}
+
+func (s *UserService) checkTwoFA(user *model.AdminUser, code string) error {
+	if !user.TwoFAEnabled || !user.TwoFASecret.Valid {
+		return ErrTwoFANotBound
+	}
+	if !totp.Validate(code, user.TwoFASecret.String) {
+		return ErrInvalidTwoFACode
+	}
+	return nil
+}
+
+func (s *UserService) checkPassword(ctx context.Context, user *model.AdminUser, input PasswordCheckInput) error {
+	plain, err := s.currentUserPlainPasswordByIVID(ctx, user.UID, input.Password, input.IVID)
+	if err != nil {
+		return err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(plain)) != nil {
+		return ErrInvalidCredentials
+	}
+	return nil
+}
+
+// currentUserPlainPasswordByIVID 用一次性 IV 解密当前用户密码；key 由 uid 动态生成
+func (s *UserService) currentUserPlainPasswordByIVID(ctx context.Context, uid, cipherPassword, ivID string) (string, error) {
+	if ivID == "" {
+		return cipherPassword, nil
+	}
+	iv, err := s.iv.Get(ctx, ivID)
+	if err != nil {
+		return "", ErrInvalidIV
+	}
+	sum := md5.Sum([]byte(uid + "sys-api"))
+	key := hex.EncodeToString(sum[:])
+	plain, err := crypto.DecryptAESGCM(cipherPassword, key, iv)
+	// IV 一次性使用，无论解密是否成功都删除，防止重放攻击
+	_ = s.iv.Delete(ctx, ivID)
+	if err != nil {
+		return "", ErrInvalidCredentials
+	}
+	return plain, nil
 }
 
 // plainPassword 尝试用 AES-GCM 解密密码；若解密失败则原样返回（兼容明文传输的旧客户端）

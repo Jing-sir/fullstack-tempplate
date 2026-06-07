@@ -15,7 +15,8 @@ const createEmptyUserInfo = (): AuthUserInfo => ({
 });
 
 export default defineStore('user', () => {
-    const pwdIv = ref(''); // 密钥
+    const pwdIv = ref(''); // IV 值
+    const pwdIvId = ref(''); // IV ID
     const account = ref<string>();
     const userInfo = ref<AuthUserInfo>(createEmptyUserInfo());
 
@@ -33,11 +34,14 @@ export default defineStore('user', () => {
 
     // 获取密钥
     const getPwdIv = async () => {
-        pwdIv.value = await sysAuthApi.pwdIv();
+        const challenge = await sysAuthApi.getIVChallenge();
+        pwdIv.value = challenge.iv;
+        pwdIvId.value = challenge.iv_id;
     };
 
     return {
         pwdIv,
+        pwdIvId,
         account,
         userInfo,
         getPwdIv,

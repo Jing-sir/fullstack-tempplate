@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"crypto/md5"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"testing"
 	"time"
 
 	"auth-service/internal/config"
+	"auth-service/internal/crypto"
 	"auth-service/internal/model"
 	"auth-service/internal/repository"
 
@@ -20,6 +23,8 @@ type stubUserStore struct {
 	listRows   []repository.AdminUserRow
 	listFilter repository.AdminUserFilter
 	updated    model.AdminUser
+	roleID     int64
+	password   string
 }
 
 func (s *stubUserStore) Create(context.Context, model.AdminUser) error {
@@ -61,7 +66,8 @@ func (s *stubUserStore) Update(_ context.Context, user model.AdminUser) error {
 	return nil
 }
 
-func (s *stubUserStore) UpdatePassword(context.Context, int64, string) error {
+func (s *stubUserStore) UpdatePassword(_ context.Context, _ int64, password string) error {
+	s.password = password
 	return nil
 }
 
@@ -70,6 +76,7 @@ func (s *stubUserStore) ResetTwoFA(context.Context, int64) error {
 }
 
 func (s *stubUserStore) SetRole(context.Context, int64, int64) error {
+	s.roleID = 1
 	return nil
 }
 
@@ -88,6 +95,18 @@ func (stubPasswordIVStore) Delete(context.Context, string) error {
 	return nil
 }
 
+type fixedPasswordIVStore struct {
+	iv string
+}
+
+func (s fixedPasswordIVStore) Get(context.Context, string) (string, error) {
+	return s.iv, nil
+}
+
+func (fixedPasswordIVStore) Delete(context.Context, string) error {
+	return nil
+}
+
 func newLoginTestService(t *testing.T, user *model.AdminUser) (*UserService, *config.JWTManager) {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
@@ -96,7 +115,18 @@ func newLoginTestService(t *testing.T, user *model.AdminUser) (*UserService, *co
 	}
 	user.Password = string(hash)
 	jwtManager := config.NewJWTManager("test-secret", time.Hour)
-	return NewUserService(&stubUserStore{user: user}, stubPasswordIVStore{}, jwtManager, "test-key", "test-issuer"), jwtManager
+	return NewUserService(&stubUserStore{user: user}, nil, stubPasswordIVStore{}, jwtManager, "test-key", "test-issuer"), jwtManager
+}
+
+func encryptCurrentUserPassword(t *testing.T, uid, password, iv string) string {
+	t.Helper()
+	sum := md5.Sum([]byte(uid + "sys-api"))
+	key := hex.EncodeToString(sum[:])
+	cipher, err := crypto.EncryptAESGCM(password, key, iv)
+	if err != nil {
+		t.Fatalf("EncryptAESGCM() error = %v", err)
+	}
+	return cipher
 }
 
 func TestLoginRequiresTwoFASetupForUnboundUser(t *testing.T) {
@@ -173,6 +203,133 @@ func TestVerifyTwoFAInvalidatesSetupTokenAndReturnsRegularToken(t *testing.T) {
 	}
 	if claims.Purpose != "" {
 		t.Fatalf("claims.Purpose = %q, want empty", claims.Purpose)
+	}
+}
+
+func TestCheckCurrentUserPasswordAndTwoFAAcceptsEncryptedPassword(t *testing.T) {
+	iv := "00112233445566778899aabb"
+	user := &model.AdminUser{
+		ID:           1,
+		UID:          "uid-1",
+		Username:     "alice",
+		Status:       1,
+		TwoFAEnabled: true,
+		TwoFASecret:  sql.NullString{String: "JBSWY3DPEHPK3PXP", Valid: true},
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	user.Password = string(hash)
+
+	code, err := totp.GenerateCode(user.TwoFASecret.String, time.Now())
+	if err != nil {
+		t.Fatalf("GenerateCode() error = %v", err)
+	}
+	users := &stubUserStore{user: user}
+	service := NewUserService(users, nil, fixedPasswordIVStore{iv: iv}, nil, "test-key", "test-issuer")
+
+	err = service.CheckCurrentUserPasswordAndTwoFA(context.Background(), user.UID, PasswordCheckInput{
+		UserID:   user.UID,
+		Password: encryptCurrentUserPassword(t, user.UID, "secret", iv),
+		FACode:   code,
+		IVID:     "test-iv-id",
+	})
+	if err != nil {
+		t.Fatalf("CheckCurrentUserPasswordAndTwoFA() error = %v", err)
+	}
+}
+
+func TestValidateCurrentTwoFARequiresBoundTwoFA(t *testing.T) {
+	user := &model.AdminUser{
+		ID:           1,
+		UID:          "uid-1",
+		Username:     "alice",
+		Status:       1,
+		TwoFAEnabled: false,
+	}
+	service := &UserService{users: &stubUserStore{user: user}}
+
+	err := service.ValidateCurrentTwoFA(context.Background(), user.ID, "123456")
+	if !errors.Is(err, ErrTwoFANotBound) {
+		t.Fatalf("ValidateCurrentTwoFA() error = %v, want ErrTwoFANotBound", err)
+	}
+}
+
+func TestValidateCurrentTwoFARejectsInvalidCode(t *testing.T) {
+	user := &model.AdminUser{
+		ID:           1,
+		UID:          "uid-1",
+		Username:     "alice",
+		Status:       1,
+		TwoFAEnabled: true,
+		TwoFASecret:  sql.NullString{String: "JBSWY3DPEHPK3PXP", Valid: true},
+	}
+	service := &UserService{users: &stubUserStore{user: user}}
+
+	err := service.ValidateCurrentTwoFA(context.Background(), user.ID, "000000")
+	if !errors.Is(err, ErrInvalidTwoFACode) {
+		t.Fatalf("ValidateCurrentTwoFA() error = %v, want ErrInvalidTwoFACode", err)
+	}
+}
+
+func TestValidateCurrentTwoFAAcceptsValidCode(t *testing.T) {
+	user := &model.AdminUser{
+		ID:           1,
+		UID:          "uid-1",
+		Username:     "alice",
+		Status:       1,
+		TwoFAEnabled: true,
+		TwoFASecret:  sql.NullString{String: "JBSWY3DPEHPK3PXP", Valid: true},
+	}
+	code, err := totp.GenerateCode(user.TwoFASecret.String, time.Now())
+	if err != nil {
+		t.Fatalf("GenerateCode() error = %v", err)
+	}
+	service := &UserService{users: &stubUserStore{user: user}}
+
+	if err := service.ValidateCurrentTwoFA(context.Background(), user.ID, code); err != nil {
+		t.Fatalf("ValidateCurrentTwoFA() error = %v", err)
+	}
+}
+
+func TestUpdateCurrentUserPasswordRequiresCurrentTwoFA(t *testing.T) {
+	iv := "00112233445566778899aabb"
+	user := &model.AdminUser{
+		ID:           1,
+		UID:          "uid-1",
+		Username:     "alice",
+		Status:       1,
+		TwoFAEnabled: true,
+		TwoFASecret:  sql.NullString{String: "JBSWY3DPEHPK3PXP", Valid: true},
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte("old-secret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword() error = %v", err)
+	}
+	user.Password = string(hash)
+	code, err := totp.GenerateCode(user.TwoFASecret.String, time.Now())
+	if err != nil {
+		t.Fatalf("GenerateCode() error = %v", err)
+	}
+	users := &stubUserStore{user: user}
+	service := NewUserService(users, nil, fixedPasswordIVStore{iv: iv}, nil, "test-key", "test-issuer")
+
+	err = service.UpdateCurrentUserPassword(context.Background(), user.UID, UpdateCurrentPasswordInput{
+		OldPassword: encryptCurrentUserPassword(t, user.UID, "old-secret", iv),
+		Password:    encryptCurrentUserPassword(t, user.UID, "new-secret", iv),
+		FACode:      code,
+		IVID:        "test-iv-id",
+		NewIVID:     "test-new-iv-id",
+	})
+	if err != nil {
+		t.Fatalf("UpdateCurrentUserPassword() error = %v", err)
+	}
+	if users.password == "" {
+		t.Fatal("UpdatePassword() was not called")
+	}
+	if bcrypt.CompareHashAndPassword([]byte(users.password), []byte("new-secret")) != nil {
+		t.Fatal("stored password hash does not match new password")
 	}
 }
 

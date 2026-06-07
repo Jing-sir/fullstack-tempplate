@@ -3,17 +3,16 @@ import type { FieldRule, FormInstance } from '@arco-design/web-vue'
 import { Message } from '@arco-design/web-vue'
 import sysAuthApi from '@/api/sys/auth'
 import apiUser from '@/api/userApi/sys/security'
-import { handlePaste } from '@/utils/common'
 import VueQr from 'vue-qr'
 import useCurrentUserSecurity from '@/use/useCurrentUserSecurity'
 import { clearManageToken, setManageToken } from '@/utils/session'
+import GoogleCode from '@/components/GoogleCode.vue'
 
 type Settings2FAType = 'add' | 'edit' | 'loginset' | 'login'
+type GoogleCodePurpose = 'replaceCurrent' | 'bindNew' | 'verifyLogin'
 
 interface FormState {
     password: string
-    code: string
-    facode: string
 }
 
 const props = withDefaults(
@@ -40,19 +39,22 @@ const storeTagsView = tagsView()
 const { encryptCurrentUserPassword, getCurrentUserId } = useCurrentUserSecurity()
 
 const formRef = ref<FormInstance | null>(null)
-const step = ref<1 | 2 | 3>(1)
+const googleCodeRef = ref<InstanceType<typeof GoogleCode> | null>(null)
+const isGoogleCodeMounted = shallowRef(false)
+const googleCodePurpose = shallowRef<GoogleCodePurpose>('bindNew')
+const step = ref<1 | 2>(1)
 const isSubmitLoading = ref(false)
 const secretKey = ref('')
+const copySecretKey = () => {
+    navigator.clipboard.writeText(secretKey.value)
+    Message.success(t('复制成功'))
+}
 const qrCode = ref('')
 const formState = reactive<FormState>({
     password: '',
-    code: '',
-    facode: '',
 })
 
 const isAddOrEdit = computed(() => ['add', 'edit'].includes(props.type))
-const isEditType = computed(() => props.type === 'edit')
-const showBackButton = computed(() => step.value === 3 && props.type !== 'login')
 
 const titleKeyMap: Record<Settings2FAType, string> = {
     add: '绑定2FA',
@@ -63,33 +65,14 @@ const titleKeyMap: Record<Settings2FAType, string> = {
 
 const dialogTitle = computed(() => t(titleKeyMap[props.type]))
 
-const addOrEditPrimaryButtonText = computed(() => {
-    if (step.value === 1) return t('验证')
-    if (step.value === 2) return t('下一步')
-    return t('确认')
-})
-
-const verifyFlowPrimaryButtonText = computed(() => (step.value === 1 ? t('下一步') : t('验证')))
+const addOrEditPrimaryButtonText = computed(() => t('验证'))
+const verifyFlowPrimaryButtonText = computed(() => t('验证'))
 
 /**
  * 只在当前步骤存在输入项时校验，避免未展示字段影响校验结果。
  */
 const formRules = computed<Record<string, FieldRule[]>>(() => ({
     password: [{ required: true, message: t('请输入'), trigger: 'blur' }],
-    facode: [
-        {
-            validator: async (_rule: FieldRule, value: string) => {
-                if (!isEditType.value && !value) return Promise.resolve()
-                if (/^\d{6}$/.test(String(value ?? ''))) return Promise.resolve()
-                return Promise.reject(t('请输入6位数字验证码'))
-            },
-            trigger: 'blur',
-        },
-    ],
-    code: [
-        { required: true, message: t('请输入6位数字验证码'), trigger: 'blur' },
-        { match: /^\d{6}$/, message: t('请输入6位数字验证码'), trigger: 'blur' },
-    ],
 }))
 
 const resetLocalState = (): void => {
@@ -97,14 +80,26 @@ const resetLocalState = (): void => {
     secretKey.value = ''
     qrCode.value = ''
     formState.password = ''
-    formState.code = ''
-    formState.facode = ''
     formRef.value?.resetFields()
 }
 
 const onCancel = (): void => {
     if (isSubmitLoading.value) return
+    googleCodeRef.value?.closeDialog()
+    isGoogleCodeMounted.value = false
     emit('onClose')
+}
+
+const openGoogleCode = async (purpose: GoogleCodePurpose): Promise<void> => {
+    googleCodePurpose.value = purpose
+    isGoogleCodeMounted.value = true
+    await nextTick()
+    await googleCodeRef.value?.onShowDialog(true)
+}
+
+const closeGoogleCode = (): void => {
+    googleCodeRef.value?.closeDialog()
+    isGoogleCodeMounted.value = false
 }
 
 /**
@@ -120,10 +115,6 @@ const getQrCode = async (): Promise<void> => {
     })
     secretKey.value = result.secret
     qrCode.value = result.qrcode
-}
-
-const onPasteCode = async (): Promise<void> => {
-    formState.code = (await handlePaste()).join('')
 }
 
 const validateCurrentStep = async (): Promise<boolean> => {
@@ -144,23 +135,20 @@ const handleLogoutAfterSecurityChange = async (): Promise<void> => {
 
 const handleAddOrEditSubmit = async (): Promise<void> => {
     if (step.value === 1) {
+        if (props.type === 'edit') {
+            await openGoogleCode('replaceCurrent')
+            return
+        }
+
         isSubmitLoading.value = true
         try {
             const userId = await getCurrentUserId()
-            const password = await encryptCurrentUserPassword(formState.password)
-            if (props.type === 'add') {
-                await apiUser.checkUserCipher({ password, userId })
-            } else {
-                await apiUser.checkUserCipherAnd2FA({
-                    password,
-                    facode: formState.facode,
-                    userId,
-                })
-            }
-
+            const { password, iv_id } = await encryptCurrentUserPassword(formState.password)
+            await apiUser.checkUserCipher({ password, userId, iv_id })
             const qrcodeResult = await apiUser.getUserQrcode()
             secretKey.value = qrcodeResult.secret
             qrCode.value = qrcodeResult.qrcode
+
             step.value = 2
         } finally {
             isSubmitLoading.value = false
@@ -168,44 +156,51 @@ const handleAddOrEditSubmit = async (): Promise<void> => {
         return
     }
 
-    if (step.value === 2) {
-        step.value = 3
-        return
-    }
-
-    isSubmitLoading.value = true
-    try {
-        await apiUser.verifyGoogleCodeAndBind({ code: formState.code })
-        emit('onClose')
-        Message.success(t(props.type === 'add' ? '2FA绑定成功' : '2FA更换成功'))
-        await handleLogoutAfterSecurityChange()
-    } finally {
-        isSubmitLoading.value = false
-    }
+    await openGoogleCode('bindNew')
 }
 
 const handleVerifySubmit = async (): Promise<void> => {
-    if (step.value === 1) {
-        step.value = 3
-        return
-    }
-
-    isSubmitLoading.value = true
-    const loginResult = await apiUser
-        .validateGoogleCode({ googleCode: formState.code })
-        .finally(() => {
-            isSubmitLoading.value = false
-        })
-    if (loginResult.token) {
-        setManageToken(loginResult.token)
-    }
-    emit('onSuccess')
-    Message.success(t('验证成功'))
+    await openGoogleCode(props.type === 'login' ? 'verifyLogin' : 'bindNew')
 }
 
-const handlePreviousStep = (): void => {
-    if (step.value !== 3) return
-    step.value = isAddOrEdit.value ? 2 : 1
+const handleGoogleCode = async (code: string): Promise<void> => {
+    isSubmitLoading.value = true
+    try {
+        if (googleCodePurpose.value === 'replaceCurrent') {
+            const userId = await getCurrentUserId()
+            const { password, iv_id } = await encryptCurrentUserPassword(formState.password)
+            const qrcodeResult = await apiUser.replaceUserQrcode({
+                password,
+                facode: code,
+                userId,
+                iv_id,
+            })
+            secretKey.value = qrcodeResult.secret
+            qrCode.value = qrcodeResult.qrcode
+            step.value = 2
+            closeGoogleCode()
+            return
+        }
+
+        if (isAddOrEdit.value) {
+            await apiUser.verifyGoogleCodeAndBind({ code })
+            closeGoogleCode()
+            emit('onClose')
+            Message.success(t(props.type === 'add' ? '2FA绑定成功' : '2FA更换成功'))
+            await handleLogoutAfterSecurityChange()
+            return
+        }
+
+        const loginResult = await apiUser.validateGoogleCode({ googleCode: code })
+        if (loginResult.token) {
+            setManageToken(loginResult.token)
+        }
+        closeGoogleCode()
+        emit('onSuccess')
+        Message.success(t('验证成功'))
+    } finally {
+        isSubmitLoading.value = false
+    }
 }
 
 const handleSubmit = async (): Promise<void> => {
@@ -226,14 +221,14 @@ watch(
     () => props.visible,
     (visible) => {
         if (!visible) {
+            closeGoogleCode()
             resetLocalState()
             return
         }
 
         resetLocalState()
         if (props.type === 'login') {
-            step.value = 3
-            void getQrCode()
+            void openGoogleCode('verifyLogin')
             return
         }
 
@@ -261,13 +256,6 @@ watch(
                     <a-form-item :label="t('登录密码')" field="password">
                         <a-input-password v-model="formState.password" :placeholder="t('请输入')" />
                     </a-form-item>
-                    <a-form-item v-if="isEditType" :label="t('2FA验证')" field="facode">
-                        <a-input-password
-                            v-model="formState.facode"
-                            :placeholder="t('请输入6位数字验证码')"
-                            maxlength="6"
-                        />
-                    </a-form-item>
                 </a-form>
             </template>
 
@@ -277,7 +265,14 @@ watch(
                         <p class="mb-2 text-sm font-semibold text-[var(--app-text)]">
                             {{ t('在谷歌验证器输入密钥') }}
                         </p>
-                        <a-input :model-value="secretKey" disabled />
+                        <a-input :model-value="secretKey" disabled>
+                            <template #suffix>
+                                <icon-copy
+                                    class="cursor-pointer text-[var(--app-text-3)] hover:text-[var(--app-primary)]"
+                                    @click="copySecretKey"
+                                />
+                            </template>
+                        </a-input>
                     </div>
                     <div>
                         <p class="mb-2 text-sm font-semibold text-[var(--app-text)]">
@@ -290,59 +285,32 @@ watch(
                 </div>
             </template>
 
-            <template v-if="step === 3">
-                <a-form ref="formRef" layout="vertical" :model="formState" :rules="formRules">
-                    <a-form-item :label="t('输入谷歌验证器中生成的六位数字验证码')" field="code">
-                        <div class="flex items-center gap-2">
-                            <a-input
-                                v-model="formState.code"
-                                :placeholder="t('请输入6位数字验证码')"
-                                maxlength="6"
-                            />
-                            <a-button type="text" @click.stop="onPasteCode">
-                                {{ t('粘贴') }}
-                            </a-button>
-                        </div>
-                    </a-form-item>
-                </a-form>
-            </template>
         </template>
 
         <template v-else>
-            <template v-if="step === 3">
-                <a-form ref="formRef" layout="vertical" :model="formState" :rules="formRules">
-                    <a-form-item :label="t('输入谷歌验证器中生成的六位数字验证码')" field="code">
-                        <div class="flex items-center gap-2">
-                            <a-input
-                                v-model="formState.code"
-                                :placeholder="t('请输入6位数字验证码')"
-                                maxlength="6"
+            <div class="space-y-4">
+                <div>
+                    <p class="mb-2 text-sm font-semibold text-[var(--app-text)]">
+                        {{ t('在谷歌验证器输入密钥') }}
+                    </p>
+                    <a-input :model-value="secretKey" disabled>
+                        <template #suffix>
+                            <icon-copy
+                                class="cursor-pointer text-[var(--app-text-3)] hover:text-[var(--app-primary)]"
+                                @click="copySecretKey"
                             />
-                            <a-button type="text" @click.stop="onPasteCode">
-                                {{ t('粘贴') }}
-                            </a-button>
-                        </div>
-                    </a-form-item>
-                </a-form>
-            </template>
-            <template v-else>
-                <div class="space-y-4">
-                    <div>
-                        <p class="mb-2 text-sm font-semibold text-[var(--app-text)]">
-                            {{ t('在谷歌验证器输入密钥') }}
-                        </p>
-                        <a-input :model-value="secretKey" disabled />
-                    </div>
-                    <div>
-                        <p class="mb-2 text-sm font-semibold text-[var(--app-text)]">
-                            {{ t('或者在谷歌验证器扫描密钥二维码') }}
-                        </p>
-                        <div class="flex justify-center">
-                            <VueQr :text="qrCode" logo-src="" :size="160" />
-                        </div>
+                        </template>
+                    </a-input>
+                </div>
+                <div>
+                    <p class="mb-2 text-sm font-semibold text-[var(--app-text)]">
+                        {{ t('或者在谷歌验证器扫描密钥二维码') }}
+                    </p>
+                    <div class="flex justify-center">
+                        <VueQr :text="qrCode" logo-src="" :size="160" />
                     </div>
                 </div>
-            </template>
+            </div>
         </template>
 
         <div class="mt-4 flex w-full gap-3">
@@ -355,9 +323,6 @@ watch(
                 >
                     {{ t('重新获取') }}
                 </a-button>
-                <a-button v-if="step === 3" class="flex-1" @click="handlePreviousStep">
-                    {{ t('上一步') }}
-                </a-button>
                 <a-button
                     type="primary"
                     class="flex-1"
@@ -369,9 +334,6 @@ watch(
             </template>
 
             <template v-else>
-                <a-button v-if="showBackButton" class="flex-1" @click="handlePreviousStep">
-                    {{ t('上一步') }}
-                </a-button>
                 <a-button
                     type="primary"
                     class="flex-1"
@@ -383,4 +345,12 @@ watch(
             </template>
         </div>
     </a-modal>
+
+    <GoogleCode
+        v-if="isGoogleCodeMounted"
+        ref="googleCodeRef"
+        :loading="isSubmitLoading"
+        @set-code="handleGoogleCode"
+        @cancel="isGoogleCodeMounted = false"
+    />
 </template>
