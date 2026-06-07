@@ -17,8 +17,8 @@ const { loading, runAsync } = useRequest(
     async () => {
         const { pass } = formState.value
         const userId = await getCurrentUserId()
-        const password = await encryptCurrentUserPassword(pass)
-        return await sysSecurityApi.checkCipher({ password, userId })
+        const { password, iv_id } = await encryptCurrentUserPassword(pass)
+        return await sysSecurityApi.checkCipher({ password, userId, iv_id })
     },
     { manual: true },
 )

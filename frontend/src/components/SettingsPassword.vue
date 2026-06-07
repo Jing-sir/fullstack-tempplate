@@ -4,9 +4,9 @@ import { Message } from '@arco-design/web-vue'
 import sysAuthApi from '@/api/sys/auth'
 import useCurrentUserSecurity from '@/use/useCurrentUserSecurity'
 import { clearManageToken } from '@/utils/session'
+import GoogleCode from '@/components/GoogleCode.vue'
 
 interface PasswordFormState {
-    facode: string
     oldPassword: string
     newPassword: string
     confirmPassword: string
@@ -33,19 +33,16 @@ const storeTagsView = tagsView()
 const { encryptCurrentUserPassword } = useCurrentUserSecurity()
 
 const formRef = ref<FormInstance | null>(null)
+const googleCodeRef = ref<InstanceType<typeof GoogleCode> | null>(null)
+const isGoogleCodeMounted = shallowRef(false)
 const isSubmitLoading = ref(false)
 const formState = reactive<PasswordFormState>({
-    facode: '',
     oldPassword: '',
     newPassword: '',
     confirmPassword: '',
 })
 
 const formRules = computed<Record<string, FieldRule[]>>(() => ({
-    facode: [
-        { required: true, message: t('请输入6位数字验证码'), trigger: 'blur' },
-        { match: /^\d{6}$/, message: t('请输入6位数字验证码'), trigger: 'blur' },
-    ],
     oldPassword: [{ required: true, message: t('请输入旧密码'), trigger: 'blur' }],
     newPassword: [
         { required: true, message: t('请输入新密码'), trigger: 'blur' },
@@ -72,7 +69,6 @@ const formRules = computed<Record<string, FieldRule[]>>(() => ({
 }))
 
 const resetLocalState = (): void => {
-    formState.facode = ''
     formState.oldPassword = ''
     formState.newPassword = ''
     formState.confirmPassword = ''
@@ -81,6 +77,8 @@ const resetLocalState = (): void => {
 
 const onCancel = (): void => {
     if (isSubmitLoading.value) return
+    googleCodeRef.value?.closeDialog()
+    isGoogleCodeMounted.value = false
     emit('onClose')
 }
 
@@ -100,18 +98,30 @@ const handleSubmit = async (): Promise<void> => {
     const errors = await formRef.value?.validate()
     if (errors) return
 
+    isGoogleCodeMounted.value = true
+    await nextTick()
+    await googleCodeRef.value?.onShowDialog(true)
+}
+
+const handleTwoFAConfirm = async (facode: string): Promise<void> => {
+    if (isSubmitLoading.value) return
+
     isSubmitLoading.value = true
     try {
-        const encryptedOldPassword = await encryptCurrentUserPassword(formState.oldPassword)
-        const encryptedNewPassword = await encryptCurrentUserPassword(formState.newPassword)
+        const { password: encryptedOldPassword, iv_id } = await encryptCurrentUserPassword(formState.oldPassword)
+        const { password: encryptedNewPassword, iv_id: new_iv_id } = await encryptCurrentUserPassword(formState.newPassword)
 
         await sysAuthApi.sysUserUpdatePassword({
             oldPassword: encryptedOldPassword,
             password: encryptedNewPassword,
             type: 1,
-            facode: formState.facode,
+            facode,
+            iv_id,
+            new_iv_id,
         })
 
+        googleCodeRef.value?.closeDialog()
+        isGoogleCodeMounted.value = false
         emit('onSuccess')
         emit('onClose')
         Message.success(t('密码修改成功'))
@@ -127,6 +137,8 @@ watch(
     () => props.visible,
     (visible) => {
         if (visible) return
+        googleCodeRef.value?.closeDialog()
+        isGoogleCodeMounted.value = false
         resetLocalState()
     },
 )
@@ -144,14 +156,6 @@ watch(
         @ok="handleSubmit"
     >
         <a-form ref="formRef" layout="vertical" :model="formState" :rules="formRules">
-            <!-- 与老项目一致，改密前需要输入当前 2FA 进行二次验证。 -->
-            <a-form-item :label="t('2FA验证')" field="facode">
-                <a-input
-                    v-model="formState.facode"
-                    :placeholder="t('请输入6位数字验证码')"
-                    maxlength="6"
-                />
-            </a-form-item>
             <a-form-item :label="t('旧密码')" field="oldPassword">
                 <a-input-password
                     v-model="formState.oldPassword"
@@ -172,4 +176,12 @@ watch(
             </a-form-item>
         </a-form>
     </a-modal>
+
+    <GoogleCode
+        v-if="isGoogleCodeMounted"
+        ref="googleCodeRef"
+        :loading="isSubmitLoading"
+        @set-code="handleTwoFAConfirm"
+        @cancel="isGoogleCodeMounted = false"
+    />
 </template>
