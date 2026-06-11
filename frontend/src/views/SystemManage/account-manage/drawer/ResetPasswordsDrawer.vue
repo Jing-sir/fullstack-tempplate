@@ -34,15 +34,23 @@ const formState = reactive({
 })
 
 const title = computed(() => (props.type === 'loginPwd' ? t('重置登录密码') : t('重置2FA')))
+const twoFAAction = computed(() =>
+    props.type === 'loginPwd' ? 'admin.password.reset' : 'admin.2fa.reset',
+)
+const twoFATarget = computed(() => `user:${props.userId}`)
 
 const visibleProxy = computed({
     get: () => props.visible,
     set: (value: boolean) => emit('update:visible', value),
 })
 
-const formRules: Record<string, FieldRule[]> = {
-    password: [{ required: true, message: t('请输入'), trigger: 'blur' }],
-}
+const formRules = computed<Record<string, FieldRule[]>>(() => {
+    const rules: Record<string, FieldRule[]> = {}
+    if (props.type === 'loginPwd') {
+        rules.password = [{ required: true, message: t('请输入'), trigger: 'blur' }]
+    }
+    return rules
+})
 
 const resetForm = (): void => {
     formState.password = ''
@@ -62,17 +70,18 @@ const handCancel = (): void => {
  * - 通过 props.type 显式分支具体接口，避免动态下标调用带来的类型丢失
  * - 提交 loading 统一在 finally 里收口，确保异常分支也能恢复按钮状态
  */
-const handleAddOrUpdate = async (facode: string): Promise<void> => {
+const handleAddOrUpdate = async (facode: string, faChallengeID: string): Promise<void> => {
     if (isSubmitLoading.value) return
 
     isSubmitLoading.value = true
 
     try {
-        const { password } = await encryptCurrentUserPassword(formState.password)
-
         if (props.type === 'loginPwd') {
+            const { password, iv_id } = await encryptCurrentUserPassword(formState.password)
             await sysAccountApi.sysUserResetPassword({
                 facode,
+                fa_challenge_id: faChallengeID,
+                iv_id,
                 password,
                 userId: props.userId,
                 type: 1,
@@ -80,7 +89,7 @@ const handleAddOrUpdate = async (facode: string): Promise<void> => {
         } else {
             await sysAccountApi.setSysUserResetSecret({
                 facode,
-                password,
+                fa_challenge_id: faChallengeID,
                 userId: props.userId,
             })
         }
@@ -122,7 +131,7 @@ const handleSubmit = async (): Promise<void> => {
             :label-col-props="{ span: 5 }"
             layout="horizontal"
         >
-            <a-form-item :label="t('登录密码')" field="password">
+            <a-form-item v-if="props.type === 'loginPwd'" :label="t('登录密码')" field="password">
                 <a-input-password
                     v-model="formState.password"
                     size="small"
@@ -136,6 +145,8 @@ const handleSubmit = async (): Promise<void> => {
         v-if="isGoogleCodeMounted"
         ref="googleCodeRef"
         :loading="isSubmitLoading"
+        :action="twoFAAction"
+        :target="twoFATarget"
         @set-code="handleAddOrUpdate"
         @cancel="isGoogleCodeMounted = false"
     />

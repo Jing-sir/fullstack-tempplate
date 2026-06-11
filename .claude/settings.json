@@ -6,7 +6,8 @@
       "Bash(xargs kill:*)",
       "Bash(go run:*)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" -X POST http://localhost:8800/api/v1/login -H \"Content-Type: application/json\" -d '{\"username\":\"admin\",\"password\":\"wrongpassword\"}')",
-      "Bash(rtk curl:*)"
+      "Bash(rtk curl:*)",
+      "Bash(rtk git:*)"
     ]
   }
 }

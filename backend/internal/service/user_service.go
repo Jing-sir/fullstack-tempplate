@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"crypto/md5"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"auth-service/internal/config"
 	"auth-service/internal/crypto"
@@ -20,14 +22,50 @@ import (
 
 // 业务错误定义，handler 层通过 errors.Is 映射为对应 HTTP 状态码
 var (
-	ErrInvalidCredentials = errors.New("用户名或密码错误")
-	ErrUserExists         = errors.New("用户已存在")
-	ErrUserNotFound       = errors.New("用户不存在")
-	ErrInvalidTwoFACode   = errors.New("2FA 验证码无效")
-	ErrInvalidIV          = errors.New("IV 无效或已过期")
-	ErrTwoFAAlreadyBound  = errors.New("2FA 已绑定")
-	ErrTwoFANotBound      = errors.New("当前账号未绑定 2FA")
+	ErrInvalidCredentials         = errors.New("用户名或密码错误")
+	ErrUserExists                 = errors.New("用户已存在")
+	ErrUserNotFound               = errors.New("用户不存在")
+	ErrInvalidTwoFACode           = errors.New("2FA 验证码无效")
+	ErrInvalidIV                  = errors.New("IV 无效或已过期")
+	ErrTwoFAAlreadyBound          = errors.New("2FA 已绑定")
+	ErrTwoFANotBound              = errors.New("当前账号未绑定 2FA")
+	ErrSuperadminAssignmentDenied = errors.New("只有超级管理员可以分配超级管理员角色")
+	ErrLastSuperadmin             = errors.New("至少保留一个启用的超级管理员")
+	ErrTwoFAChallengeInvalid      = errors.New("2FA challenge 无效或已过期")
+	ErrTwoFARateLimited           = errors.New("2FA 验证失败次数过多，请稍后重试")
+	ErrTwoFAReplay                = errors.New("当前 2FA 验证码已用于其他高风险操作，请等待新验证码")
 )
+
+const (
+	TwoFAActionMenuCreate          = "permission.menu.create"
+	TwoFAActionMenuUpdate          = "permission.menu.update"
+	TwoFAActionMenuDelete          = "permission.menu.delete"
+	TwoFAActionMenuStatus          = "permission.menu.status"
+	TwoFAActionMenuMove            = "permission.menu.move"
+	TwoFAActionAdminPasswordReset  = "admin.password.reset"
+	TwoFAActionAdminTwoFAReset     = "admin.2fa.reset"
+	TwoFAActionCurrentPassword     = "security.password.update"
+	TwoFAActionCurrentTwoFAReplace = "security.2fa.replace"
+	TwoFAActionPasswordTwoFACheck  = "security.password-2fa.check"
+
+	twoFAChallengeTTL = 2 * time.Minute
+	twoFAFailureTTL   = 10 * time.Minute
+	twoFAReplayTTL    = 90 * time.Second
+	twoFAFailureLimit = int64(5)
+)
+
+var allowedTwoFAActions = map[string]struct{}{
+	TwoFAActionMenuCreate:          {},
+	TwoFAActionMenuUpdate:          {},
+	TwoFAActionMenuDelete:          {},
+	TwoFAActionMenuStatus:          {},
+	TwoFAActionMenuMove:            {},
+	TwoFAActionAdminPasswordReset:  {},
+	TwoFAActionAdminTwoFAReset:     {},
+	TwoFAActionCurrentPassword:     {},
+	TwoFAActionCurrentTwoFAReplace: {},
+	TwoFAActionPasswordTwoFACheck:  {},
+}
 
 // CreateUserInput 创建用户的请求参数
 type CreateUserInput struct {
@@ -61,20 +99,28 @@ type TwoFASetupResult struct {
 
 // PasswordCheckInput 当前用户安全操作前置校验参数
 type PasswordCheckInput struct {
-	Password string `json:"password" binding:"required"`
-	UserID   string `json:"userId"`
-	FACode   string `json:"facode"`
-	IVID     string `json:"iv_id"`
+	Password      string `json:"password" binding:"required"`
+	UserID        string `json:"userId"`
+	FACode        string `json:"facode"`
+	FAChallengeID string `json:"fa_challenge_id"`
+	IVID          string `json:"iv_id"`
 }
 
 // UpdateCurrentPasswordInput 当前用户修改登录密码参数
 type UpdateCurrentPasswordInput struct {
-	OldPassword string `json:"oldPassword" binding:"required"`
-	Password    string `json:"password"    binding:"required"`
-	FACode      string `json:"facode"      binding:"required"`
-	IVID        string `json:"iv_id"`
-	NewIVID     string `json:"new_iv_id"`
-	Type        int    `json:"type"`
+	OldPassword   string `json:"oldPassword"       binding:"required"`
+	Password      string `json:"password"          binding:"required"`
+	FACode        string `json:"facode"            binding:"required"`
+	FAChallengeID string `json:"fa_challenge_id"   binding:"required"`
+	IVID          string `json:"iv_id"`
+	NewIVID       string `json:"new_iv_id"`
+	Type          int    `json:"type"`
+}
+
+// TwoFAChallengeResult 是高风险操作的一次性 2FA challenge
+type TwoFAChallengeResult struct {
+	ChallengeID string `json:"challenge_id"`
+	ExpiresIn   int    `json:"expires_in"`
 }
 
 // UserService 负责用户相关业务逻辑，包括注册、登录、2FA 绑定与验证
@@ -82,6 +128,7 @@ type UserService struct {
 	users             UserStore          // 用户数据访问接口
 	roles             RoleStore          // 角色数据访问接口，用于种子账号授权
 	iv                passwordIVStore    // IV 挑战值服务，用于密码传输加密
+	twoFA             TwoFASecurityStore // 高风险 2FA challenge、限流与防重放
 	jwt               *config.JWTManager // JWT 签发与解析
 	passwordCryptoKey string             // AES-GCM 密码解密密钥
 	twoFAIssuer       string             // 2FA TOTP 发行方名称（显示在 Authenticator App 中）
@@ -93,11 +140,20 @@ type passwordIVStore interface {
 }
 
 // NewUserService 构造 UserService，所有依赖通过参数注入
-func NewUserService(users UserStore, roles RoleStore, iv passwordIVStore, jwt *config.JWTManager, passwordCryptoKey, twoFAIssuer string) *UserService {
+func NewUserService(
+	users UserStore,
+	roles RoleStore,
+	iv passwordIVStore,
+	twoFA TwoFASecurityStore,
+	jwt *config.JWTManager,
+	passwordCryptoKey,
+	twoFAIssuer string,
+) *UserService {
 	return &UserService{
 		users:             users,
 		roles:             roles,
 		iv:                iv,
+		twoFA:             twoFA,
 		jwt:               jwt,
 		passwordCryptoKey: passwordCryptoKey,
 		twoFAIssuer:       twoFAIssuer,
@@ -244,7 +300,13 @@ func (s *UserService) SetupReplacementTwoFA(ctx context.Context, uid string, inp
 	if err != nil {
 		return TwoFASetupResult{}, err
 	}
-	if err := s.checkPasswordAndTwoFA(ctx, user, PasswordCheckInput{Password: input.Password, FACode: input.FACode, IVID: input.IVID}); err != nil {
+	if err := s.checkPasswordAndTwoFA(
+		ctx,
+		user,
+		input,
+		TwoFAActionCurrentTwoFAReplace,
+		"current",
+	); err != nil {
 		return TwoFASetupResult{}, err
 	}
 
@@ -317,11 +379,41 @@ func (s *UserService) CheckCurrentUserPasswordAndTwoFA(ctx context.Context, uid 
 	if err != nil {
 		return err
 	}
-	return s.checkPasswordAndTwoFA(ctx, user, input)
+	return s.checkPasswordAndTwoFA(ctx, user, input, TwoFAActionPasswordTwoFACheck, "current")
 }
 
-// ValidateCurrentTwoFA 校验当前登录管理员的 2FA 验证码，不要求再次输入登录密码
-func (s *UserService) ValidateCurrentTwoFA(ctx context.Context, adminUserID int64, code string) error {
+// CreateTwoFAChallenge 创建绑定当前管理员、动作和目标的一次性 challenge
+func (s *UserService) CreateTwoFAChallenge(
+	ctx context.Context,
+	adminUserID int64,
+	action string,
+	target string,
+) (TwoFAChallengeResult, error) {
+	if _, ok := allowedTwoFAActions[action]; !ok || target == "" || len(target) > 256 {
+		return TwoFAChallengeResult{}, ErrTwoFAChallengeInvalid
+	}
+	if s.twoFA == nil {
+		return TwoFAChallengeResult{}, fmt.Errorf("2fa security store unavailable")
+	}
+	id := uuid.NewString()
+	if err := s.twoFA.SaveChallenge(ctx, id, adminUserID, action, target, twoFAChallengeTTL); err != nil {
+		return TwoFAChallengeResult{}, fmt.Errorf("save 2fa challenge: %w", err)
+	}
+	return TwoFAChallengeResult{
+		ChallengeID: id,
+		ExpiresIn:   int(twoFAChallengeTTL / time.Second),
+	}, nil
+}
+
+// ValidateCurrentTwoFA 校验并消费当前登录管理员的高风险操作 2FA challenge
+func (s *UserService) ValidateCurrentTwoFA(
+	ctx context.Context,
+	adminUserID int64,
+	code string,
+	challengeID string,
+	action string,
+	target string,
+) error {
 	user, err := s.users.GetByID(ctx, adminUserID)
 	if err != nil {
 		return fmt.Errorf("get current user: %w", err)
@@ -329,7 +421,7 @@ func (s *UserService) ValidateCurrentTwoFA(ctx context.Context, adminUserID int6
 	if user == nil {
 		return ErrUserNotFound
 	}
-	return s.checkTwoFA(user, code)
+	return s.checkPrivilegedTwoFA(ctx, user, code, challengeID, action, target)
 }
 
 // UpdateCurrentUserPassword 校验旧密码和 2FA 后修改当前登录用户密码
@@ -338,7 +430,12 @@ func (s *UserService) UpdateCurrentUserPassword(ctx context.Context, uid string,
 	if err != nil {
 		return err
 	}
-	if err := s.checkPasswordAndTwoFA(ctx, user, PasswordCheckInput{Password: input.OldPassword, FACode: input.FACode, IVID: input.IVID}); err != nil {
+	if err := s.checkPasswordAndTwoFA(ctx, user, PasswordCheckInput{
+		Password:      input.OldPassword,
+		FACode:        input.FACode,
+		FAChallengeID: input.FAChallengeID,
+		IVID:          input.IVID,
+	}, TwoFAActionCurrentPassword, "current"); err != nil {
 		return err
 	}
 
@@ -489,7 +586,7 @@ func (s *UserService) GetAdminUserDetail(ctx context.Context, uid string) (Admin
 }
 
 // CreateAdminUser 新增管理员账号
-func (s *UserService) CreateAdminUser(ctx context.Context, input AdminUserCreateInput) error {
+func (s *UserService) CreateAdminUser(ctx context.Context, operatorID int64, input AdminUserCreateInput) error {
 	count, err := s.users.CountByUsername(ctx, input.Account)
 	if err != nil {
 		return fmt.Errorf("check username: %w", err)
@@ -516,31 +613,21 @@ func (s *UserService) CreateAdminUser(ctx context.Context, input AdminUserCreate
 		Password: string(initialHash),
 		Status:   state,
 	}
-	if err := s.users.Create(ctx, newUser); err != nil {
+	roleID, err := s.validateAssignableRole(ctx, operatorID, input.RoleID)
+	if err != nil {
+		return err
+	}
+	if err := s.users.CreateWithRole(ctx, newUser, roleID); err != nil {
 		if errors.Is(err, repository.ErrDuplicateKey) {
 			return ErrUserExists
 		}
-		return fmt.Errorf("create user: %w", err)
-	}
-
-	created, err := s.users.GetByUsername(ctx, input.Account)
-	if err != nil || created == nil {
-		return fmt.Errorf("get created user: %w", err)
-	}
-
-	if input.RoleID != "" {
-		roleIDInt, err := strconv.ParseInt(input.RoleID, 10, 64)
-		if err == nil && roleIDInt > 0 {
-			if err := s.users.SetRole(ctx, created.ID, roleIDInt); err != nil {
-				return fmt.Errorf("set role: %w", err)
-			}
-		}
+		return fmt.Errorf("create user with role: %w", err)
 	}
 	return nil
 }
 
 // UpdateAdminUser 更新管理员账号信息（状态、角色等）
-func (s *UserService) UpdateAdminUser(ctx context.Context, input AdminUserUpdateInput) error {
+func (s *UserService) UpdateAdminUser(ctx context.Context, operatorID int64, input AdminUserUpdateInput) error {
 	uid := input.ID
 	user, err := s.users.GetByUID(ctx, uid)
 	if err != nil {
@@ -560,26 +647,60 @@ func (s *UserService) UpdateAdminUser(ctx context.Context, input AdminUserUpdate
 		user.RealName = input.FullName
 	}
 
-	if err := s.users.Update(ctx, *user); err != nil {
+	var roleID *int64
+	if input.RoleID != "" {
+		parsedRoleID, err := s.validateAssignableRole(ctx, operatorID, input.RoleID)
+		if err != nil {
+			return err
+		}
+		roleID = &parsedRoleID
+	}
+
+	if err := s.users.UpdateWithRole(ctx, *user, roleID); err != nil {
 		if errors.Is(err, repository.ErrDuplicateKey) {
 			return ErrUserExists
 		}
-		return fmt.Errorf("update user: %w", err)
-	}
-
-	if input.RoleID != "" {
-		roleIDInt, err := strconv.ParseInt(input.RoleID, 10, 64)
-		if err == nil {
-			if err := s.users.SetRole(ctx, user.ID, roleIDInt); err != nil {
-				return fmt.Errorf("set role: %w", err)
-			}
+		if errors.Is(err, repository.ErrLastSuperadmin) {
+			return ErrLastSuperadmin
 		}
+		return fmt.Errorf("update user with role: %w", err)
 	}
 	return nil
 }
 
-// ResetAdminUserPassword 重置管理员密码（需要操作者的 2FA 验证，此处仅更新密码）
-func (s *UserService) ResetAdminUserPassword(ctx context.Context, targetUID, newPassword string) error {
+func (s *UserService) validateAssignableRole(ctx context.Context, operatorID int64, roleIDText string) (int64, error) {
+	roleID, err := strconv.ParseInt(roleIDText, 10, 64)
+	if err != nil || roleID <= 0 {
+		return 0, ErrRoleNotFound
+	}
+	if s.roles == nil {
+		return 0, ErrRoleNotFound
+	}
+	role, err := s.roles.GetByID(ctx, roleID)
+	if err != nil {
+		return 0, fmt.Errorf("get target role: %w", err)
+	}
+	if role == nil {
+		return 0, ErrRoleNotFound
+	}
+	if role.Name != systemRoleName {
+		return roleID, nil
+	}
+
+	operatorRoles, err := s.roles.GetByAdminUserID(ctx, operatorID)
+	if err != nil {
+		return 0, fmt.Errorf("get operator roles: %w", err)
+	}
+	for _, operatorRole := range operatorRoles {
+		if operatorRole.Name == systemRoleName && operatorRole.Status == 1 {
+			return roleID, nil
+		}
+	}
+	return 0, ErrSuperadminAssignmentDenied
+}
+
+// ResetAdminUserPassword 使用操作者的一次性 IV 解密新密码并重置目标管理员密码
+func (s *UserService) ResetAdminUserPassword(ctx context.Context, operatorUID, targetUID, newPassword, ivID string) error {
 	user, err := s.users.GetByUID(ctx, targetUID)
 	if err != nil {
 		return fmt.Errorf("get user: %w", err)
@@ -588,9 +709,9 @@ func (s *UserService) ResetAdminUserPassword(ctx context.Context, targetUID, new
 		return ErrUserNotFound
 	}
 
-	plain, decErr := s.plainPassword(ctx, newPassword, "")
-	if decErr != nil {
-		plain = newPassword
+	plain, err := s.currentUserPlainPasswordByIVID(ctx, operatorUID, newPassword, ivID)
+	if err != nil {
+		return err
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
@@ -629,11 +750,17 @@ func (s *UserService) getCurrentUserForSecurity(ctx context.Context, uid, reques
 	return user, nil
 }
 
-func (s *UserService) checkPasswordAndTwoFA(ctx context.Context, user *model.AdminUser, input PasswordCheckInput) error {
+func (s *UserService) checkPasswordAndTwoFA(
+	ctx context.Context,
+	user *model.AdminUser,
+	input PasswordCheckInput,
+	action string,
+	target string,
+) error {
 	if err := s.checkPassword(ctx, user, input); err != nil {
 		return err
 	}
-	return s.checkTwoFA(user, input.FACode)
+	return s.checkPrivilegedTwoFA(ctx, user, input.FACode, input.FAChallengeID, action, target)
 }
 
 func (s *UserService) checkTwoFA(user *model.AdminUser, code string) error {
@@ -644,6 +771,74 @@ func (s *UserService) checkTwoFA(user *model.AdminUser, code string) error {
 		return ErrInvalidTwoFACode
 	}
 	return nil
+}
+
+func (s *UserService) checkPrivilegedTwoFA(
+	ctx context.Context,
+	user *model.AdminUser,
+	code string,
+	challengeID string,
+	action string,
+	target string,
+) error {
+	if !user.TwoFAEnabled || !user.TwoFASecret.Valid {
+		return ErrTwoFANotBound
+	}
+	if challengeID == "" || s.twoFA == nil {
+		return ErrTwoFAChallengeInvalid
+	}
+	blocked, err := s.twoFA.IsBlocked(ctx, user.ID, twoFAFailureLimit)
+	if err != nil {
+		return fmt.Errorf("check 2fa failure limit: %w", err)
+	}
+	if blocked {
+		return ErrTwoFARateLimited
+	}
+
+	counter, valid := matchingTOTPCounter(user.TwoFASecret.String, code, time.Now())
+	if !valid {
+		failures, err := s.twoFA.RecordFailure(ctx, user.ID, twoFAFailureTTL)
+		if err != nil {
+			return fmt.Errorf("record 2fa failure: %w", err)
+		}
+		if failures >= twoFAFailureLimit {
+			return ErrTwoFARateLimited
+		}
+		return ErrInvalidTwoFACode
+	}
+	if err := s.twoFA.ConsumeChallenge(
+		ctx,
+		challengeID,
+		user.ID,
+		action,
+		target,
+		counter,
+		twoFAReplayTTL,
+	); err != nil {
+		if errors.Is(err, repository.ErrTwoFAChallengeInvalid) {
+			return ErrTwoFAChallengeInvalid
+		}
+		if errors.Is(err, repository.ErrTwoFAReplay) {
+			return ErrTwoFAReplay
+		}
+		return fmt.Errorf("consume 2fa challenge: %w", err)
+	}
+	return nil
+}
+
+func matchingTOTPCounter(secret, code string, now time.Time) (int64, bool) {
+	currentCounter := now.Unix() / 30
+	for offset := int64(-1); offset <= 1; offset++ {
+		counter := currentCounter + offset
+		generated, err := totp.GenerateCode(secret, time.Unix(counter*30, 0))
+		if err != nil {
+			return 0, false
+		}
+		if subtle.ConstantTimeCompare([]byte(generated), []byte(code)) == 1 {
+			return counter, true
+		}
+	}
+	return 0, false
 }
 
 func (s *UserService) checkPassword(ctx context.Context, user *model.AdminUser, input PasswordCheckInput) error {

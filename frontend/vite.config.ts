@@ -9,7 +9,7 @@ import path from 'path'
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '')
-    const proxyTarget = env.VITE_DEV_PROXY_TARGET || 'http://43.199.161.111:10002/'
+    const proxyTarget = env.VITE_DEV_PROXY_TARGET || 'http://localhost:8800/'
 
     return {
         base: env.VITE_PUBLIC_PATH || '/',

@@ -29,7 +29,14 @@ interface MockMenuSmokeOptions {
     onMenuList?: () => void
 }
 
-const menuRoles = ['systemManage', 'operationLog', 'rolePermissions', 'accountManage']
+const menuRoles = [
+    'systemManage',
+    'operationLog',
+    'rolePermissions',
+    'accountManage',
+    'permissionLab',
+    'permissionLabOrders',
+]
 
 const menuList = menuRoles.map((role, index) => ({
     id: String(index + 1),
@@ -46,6 +53,7 @@ export const LIST_MENU_CASES: MenuCase[] = [
     { label: '操作日志', path: '/systemManage/operationLog', role: 'operationLog' },
     { label: '角色权限管理', path: '/systemManage/rolePermissions', role: 'rolePermissions' },
     { label: '账号管理', path: '/systemManage/accountManage', role: 'accountManage' },
+    { label: '订单权限样例', path: '/permissionLab/orders', role: 'permissionLabOrders' },
 ]
 
 function fulfill(route: Route, data: unknown, headers: Record<string, string> = {}) {
@@ -91,6 +99,13 @@ export async function mockMenuSmokeApis(
 
         if (pathname.endsWith('/security/iv')) {
             return fulfillCurrent(route, { iv_id: 'mock-iv-id', iv: '00112233445566778899aabb' })
+        }
+
+        if (pathname.endsWith('/security/2fa/challenges')) {
+            return fulfillCurrent(route, {
+                challenge_id: 'mock-2fa-challenge',
+                expires_in: 120,
+            })
         }
 
         if (pathname.endsWith('/users')) {

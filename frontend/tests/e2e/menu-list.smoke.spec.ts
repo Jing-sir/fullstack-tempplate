@@ -10,7 +10,21 @@ test.describe('list menu smoke', () => {
     for (const menu of LIST_MENU_CASES) {
         test(`menu ${menu.label} should render (${menu.path})`, async ({ page }) => {
             const runtime = attachRuntimeGuard(page)
-            await mockMenuSmokeApis(page)
+            await mockMenuSmokeApis(
+                page,
+                menu.role === 'permissionLabOrders'
+                    ? {
+                          permissionLabOrders: [
+                              {
+                                  id: '200',
+                                  name: 'permissionLabOrders-tabAll',
+                                  component: 'permissionLabOrders-tabAll',
+                                  type: 5,
+                              },
+                          ],
+                      }
+                    : {},
+            )
             await setAuthCookie(page)
 
             await page.goto(menu.path)

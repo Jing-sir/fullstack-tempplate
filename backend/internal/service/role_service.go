@@ -6,12 +6,17 @@ import (
 	"fmt"
 
 	"auth-service/internal/model"
+	"auth-service/internal/repository"
 )
 
 // 角色管理业务错误
 var (
-	ErrRoleNotFound = errors.New("角色不存在")
+	ErrRoleNotFound        = errors.New("角色不存在")
+	ErrRoleNameTaken       = errors.New("角色标识已存在")
+	ErrSystemRoleProtected = errors.New("系统角色不可重命名、禁用、删除或修改权限")
 )
+
+const systemRoleName = "superadmin"
 
 // CreateRoleInput 新增角色的请求参数
 type CreateRoleInput struct {
@@ -74,7 +79,35 @@ func (s *RoleService) Create(ctx context.Context, input CreateRoleInput) (int64,
 		Status:      status,
 	})
 	if err != nil {
+		if errors.Is(err, repository.ErrDuplicateKey) {
+			return 0, ErrRoleNameTaken
+		}
 		return 0, fmt.Errorf("create role: %w", err)
+	}
+	return id, nil
+}
+
+// CreateWithMenus 原子新增角色并写入权限集合
+func (s *RoleService) CreateWithMenus(ctx context.Context, input CreateRoleInput, menuIDs []int64) (int64, error) {
+	normalizedMenuIDs, err := s.normalizeMenuIDs(ctx, menuIDs)
+	if err != nil {
+		return 0, err
+	}
+	status := input.Status
+	if status == 0 {
+		status = 1
+	}
+	id, err := s.roles.CreateWithMenus(ctx, model.Role{
+		Name:        input.Name,
+		Title:       input.Title,
+		Description: input.Description,
+		Status:      status,
+	}, normalizedMenuIDs)
+	if err != nil {
+		if errors.Is(err, repository.ErrDuplicateKey) {
+			return 0, ErrRoleNameTaken
+		}
+		return 0, fmt.Errorf("create role with menus: %w", err)
 	}
 	return id, nil
 }
@@ -88,13 +121,52 @@ func (s *RoleService) Update(ctx context.Context, id int64, input UpdateRoleInpu
 	if existing == nil {
 		return ErrRoleNotFound
 	}
+	if existing.Name == systemRoleName && (input.Name != existing.Name || input.Status != 1) {
+		return ErrSystemRoleProtected
+	}
 
 	existing.Name = input.Name
 	existing.Title = input.Title
 	existing.Description = input.Description
 	existing.Status = input.Status
 
-	return s.roles.Update(ctx, *existing)
+	if err := s.roles.Update(ctx, *existing); err != nil {
+		if errors.Is(err, repository.ErrDuplicateKey) {
+			return ErrRoleNameTaken
+		}
+		return fmt.Errorf("update role: %w", err)
+	}
+	return nil
+}
+
+// UpdateWithMenus 原子更新角色基本信息和权限集合
+func (s *RoleService) UpdateWithMenus(ctx context.Context, id int64, input UpdateRoleInput, menuIDs []int64) error {
+	existing, err := s.roles.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("get role: %w", err)
+	}
+	if existing == nil {
+		return ErrRoleNotFound
+	}
+	if existing.Name == systemRoleName {
+		return ErrSystemRoleProtected
+	}
+	normalizedMenuIDs, err := s.normalizeMenuIDs(ctx, menuIDs)
+	if err != nil {
+		return err
+	}
+
+	existing.Name = input.Name
+	existing.Title = input.Title
+	existing.Description = input.Description
+	existing.Status = input.Status
+	if err := s.roles.UpdateWithMenus(ctx, *existing, normalizedMenuIDs); err != nil {
+		if errors.Is(err, repository.ErrDuplicateKey) {
+			return ErrRoleNameTaken
+		}
+		return fmt.Errorf("update role with menus: %w", err)
+	}
+	return nil
 }
 
 // Delete 删除角色
@@ -105,6 +177,9 @@ func (s *RoleService) Delete(ctx context.Context, id int64) error {
 	}
 	if existing == nil {
 		return ErrRoleNotFound
+	}
+	if existing.Name == systemRoleName {
+		return ErrSystemRoleProtected
 	}
 	return s.roles.Delete(ctx, id)
 }
@@ -133,6 +208,9 @@ func (s *RoleService) SetMenus(ctx context.Context, roleID int64, menuIDs []int6
 	}
 	if existing == nil {
 		return ErrRoleNotFound
+	}
+	if existing.Name == systemRoleName {
+		return ErrSystemRoleProtected
 	}
 	normalizedMenuIDs, err := s.normalizeMenuIDs(ctx, menuIDs)
 	if err != nil {

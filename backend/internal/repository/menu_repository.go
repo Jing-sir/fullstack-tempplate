@@ -79,10 +79,21 @@ func (r *MenuRepository) GetByRoleIDs(ctx context.Context, roleIDs []int64) ([]m
 	}
 
 	query := fmt.Sprintf(`
+		WITH RECURSIVE enabled_menus AS (
+			SELECT id, parent_id, name, title, type, icon, sort, status, created_at, updated_at
+			FROM menus
+			WHERE parent_id = 0 AND status = 1
+			UNION ALL
+			SELECT child.id, child.parent_id, child.name, child.title, child.type,
+			       child.icon, child.sort, child.status, child.created_at, child.updated_at
+			FROM menus child
+			INNER JOIN enabled_menus parent ON child.parent_id = parent.id
+			WHERE child.status = 1
+		)
 		SELECT DISTINCT m.id, m.parent_id, m.name, m.title, m.type, m.icon, m.sort, m.status, m.created_at, m.updated_at
-		FROM menus m
+		FROM enabled_menus m
 		INNER JOIN role_menus rm ON rm.menu_id = m.id
-		WHERE rm.role_id IN (%s) AND m.status = 1
+		WHERE rm.role_id IN (%s)
 		ORDER BY m.sort ASC, m.id ASC
 	`, placeholders)
 
@@ -135,6 +146,9 @@ func (r *MenuRepository) Create(ctx context.Context, m model.Menu) (int64, error
 		RETURNING id
 	`, m.ParentID, m.Name, m.Title, m.Type, m.Icon, m.Sort, m.Status).Scan(&id)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return 0, ErrDuplicateKey
+		}
 		return 0, fmt.Errorf("create menu: %w", err)
 	}
 	return id, nil
@@ -148,7 +162,182 @@ func (r *MenuRepository) Update(ctx context.Context, m model.Menu) error {
 		WHERE id=$8
 	`, m.ParentID, m.Name, m.Title, m.Type, m.Icon, m.Sort, m.Status, m.ID)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return ErrDuplicateKey
+		}
 		return fmt.Errorf("update menu: %w", err)
+	}
+	return nil
+}
+
+// CountChildren 统计直接子节点数量
+func (r *MenuRepository) CountChildren(ctx context.Context, id int64) (int, error) {
+	var count int
+	if err := r.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM menus WHERE parent_id=$1
+	`, id).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count menu children: %w", err)
+	}
+	return count, nil
+}
+
+// CreateWithRoleGrantAndVersionBump 原子新增节点、授权角色并递增权限版本
+func (r *MenuRepository) CreateWithRoleGrantAndVersionBump(ctx context.Context, m model.Menu, roleName string) (int64, error) {
+	var id int64
+	err := r.runMutation(ctx, func(tx *sql.Tx) error {
+		if err := tx.QueryRowContext(ctx, `
+			INSERT INTO menus (parent_id, name, title, type, icon, sort, status)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			RETURNING id
+		`, m.ParentID, m.Name, m.Title, m.Type, m.Icon, m.Sort, m.Status).Scan(&id); err != nil {
+			if isUniqueViolation(err) {
+				return ErrDuplicateKey
+			}
+			return fmt.Errorf("create menu: %w", err)
+		}
+		result, err := tx.ExecContext(ctx, `
+			INSERT INTO role_menus (role_id, menu_id)
+			SELECT id, $2 FROM roles WHERE name=$1
+			ON CONFLICT DO NOTHING
+		`, roleName, id)
+		if err != nil {
+			return fmt.Errorf("grant menu to role: %w", err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("count granted menu rows: %w", err)
+		}
+		if affected != 1 {
+			return ErrReferencedRoleNotFound
+		}
+		return nil
+	})
+	return id, err
+}
+
+// UpdateWithVersionBump 原子更新节点并递增权限版本
+func (r *MenuRepository) UpdateWithVersionBump(ctx context.Context, m model.Menu) error {
+	return r.runMutation(ctx, func(tx *sql.Tx) error {
+		if err := lockMenuTree(ctx, tx); err != nil {
+			return err
+		}
+		if err := validateMenuMove(ctx, tx, m.ID, m.ParentID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `
+			UPDATE menus
+			SET parent_id=$1, title=$2, type=$3, icon=$4, sort=$5, status=$6, updated_at=NOW()
+			WHERE id=$7
+		`, m.ParentID, m.Title, m.Type, m.Icon, m.Sort, m.Status, m.ID)
+		if err != nil {
+			if isUniqueViolation(err) {
+				return ErrDuplicateKey
+			}
+			return fmt.Errorf("update menu: %w", err)
+		}
+		return nil
+	})
+}
+
+// UpdateStatusWithVersionBump 原子更新节点状态并递增权限版本
+func (r *MenuRepository) UpdateStatusWithVersionBump(ctx context.Context, id int64, status int) error {
+	return r.runMutation(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE menus SET status=$1, updated_at=NOW() WHERE id=$2
+		`, status, id); err != nil {
+			return fmt.Errorf("update menu status: %w", err)
+		}
+		return nil
+	})
+}
+
+// MoveWithVersionBump 原子移动节点并递增权限版本
+func (r *MenuRepository) MoveWithVersionBump(ctx context.Context, id int64, parentID int64, sort int) error {
+	return r.runMutation(ctx, func(tx *sql.Tx) error {
+		if err := lockMenuTree(ctx, tx); err != nil {
+			return err
+		}
+		if err := validateMenuMove(ctx, tx, id, parentID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE menus SET parent_id=$1, sort=$2, updated_at=NOW() WHERE id=$3
+		`, parentID, sort, id); err != nil {
+			return fmt.Errorf("move menu: %w", err)
+		}
+		return nil
+	})
+}
+
+// DeleteWithVersionBump 原子删除节点及后代并递增权限版本
+func (r *MenuRepository) DeleteWithVersionBump(ctx context.Context, id int64) error {
+	return r.runMutation(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `
+			WITH RECURSIVE descendants AS (
+				SELECT id FROM menus WHERE id = $1
+				UNION
+				SELECT m.id
+				FROM menus m
+				INNER JOIN descendants d ON m.parent_id = d.id
+			)
+			DELETE FROM menus WHERE id IN (SELECT id FROM descendants)
+		`, id); err != nil {
+			return fmt.Errorf("delete menu: %w", err)
+		}
+		return nil
+	})
+}
+
+func lockMenuTree(ctx context.Context, tx *sql.Tx) error {
+	const menuTreeLockKey int64 = 7_400_130_001
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", menuTreeLockKey); err != nil {
+		return fmt.Errorf("lock menu tree: %w", err)
+	}
+	return nil
+}
+
+func validateMenuMove(ctx context.Context, tx *sql.Tx, id, parentID int64) error {
+	if parentID == 0 {
+		return nil
+	}
+
+	var createsCycle bool
+	if err := tx.QueryRowContext(ctx, `
+		WITH RECURSIVE descendants AS (
+			SELECT id FROM menus WHERE id = $1
+			UNION
+			SELECT child.id
+			FROM menus child
+			INNER JOIN descendants parent ON child.parent_id = parent.id
+		)
+		SELECT EXISTS(SELECT 1 FROM descendants WHERE id = $2)
+	`, id, parentID).Scan(&createsCycle); err != nil {
+		return fmt.Errorf("validate menu move: %w", err)
+	}
+	if createsCycle {
+		return ErrMenuCycle
+	}
+	return nil
+}
+
+func (r *MenuRepository) runMutation(ctx context.Context, mutate func(*sql.Tx) error) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin menu mutation: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := mutate(tx); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE admin_users
+		SET permission_version=permission_version+1, updated_at=CURRENT_TIMESTAMP
+	`); err != nil {
+		return fmt.Errorf("bump all permission versions: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit menu mutation: %w", err)
 	}
 	return nil
 }

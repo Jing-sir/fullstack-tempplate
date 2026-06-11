@@ -29,11 +29,74 @@ export interface RoleAddUpdateParams {
     menuIdList?: Array<{ menuId: number; checkUserPassword?: number }>
 }
 
+export type PermissionMenuType = 1 | 2 | 3 | 4 | 5
+
+export interface PermissionMenuNode {
+    id: number
+    parentId: number
+    name: string
+    title: string
+    type: PermissionMenuType
+    icon: string
+    sort: number
+    status: number
+    protected: boolean
+    children?: PermissionMenuNode[]
+}
+
+export interface CreatePermissionMenuParams {
+    parent_id: number
+    name: string
+    title: string
+    type: PermissionMenuType
+    icon?: string
+    sort?: number
+    status?: number
+    facode: string
+    fa_challenge_id: string
+}
+
+export type UpdatePermissionMenuParams = CreatePermissionMenuParams
+
+export interface DeletePermissionMenuParams {
+    facode: string
+    fa_challenge_id: string
+    cascade?: boolean
+}
+
+export interface UpdatePermissionMenuStatusParams {
+    status: number
+    facode: string
+    fa_challenge_id: string
+}
+
+export interface MovePermissionMenuParams {
+    parent_id: number
+    sort?: number
+    facode: string
+    fa_challenge_id: string
+}
+
 const normalizeMenuItem = (item: Partial<RoleMenuItem>): RoleMenuItem => ({
     ...item,
     name: String(item.name ?? item.component ?? ''),
     component: String(item.component ?? item.name ?? ''),
     children: item.children?.map(normalizeMenuItem),
+})
+
+const normalizePermissionMenuNode = (item: Record<string, unknown>): PermissionMenuNode => ({
+    id: Number(item.id ?? 0),
+    parentId: Number(item.parent_id ?? item.parentId ?? 0),
+    name: String(item.name ?? ''),
+    title: String(item.title ?? item.name ?? ''),
+    type: Number(item.type ?? 0) as PermissionMenuType,
+    icon: String(item.icon ?? ''),
+    sort: Number(item.sort ?? 0),
+    status: Number(item.status ?? 0),
+    protected: Boolean(item.protected),
+    children: Array.isArray(item.children)
+        ? (item.children as Array<Record<string, unknown>>).map(normalizePermissionMenuNode)
+        : undefined,
 })
 
 class SysRoleApi extends Api {
@@ -82,12 +145,68 @@ class SysRoleApi extends Api {
             menuId: String(item.id ?? ''),
             menuName: String(item.title ?? item.name ?? ''),
             parentId: String(item.parent_id ?? '0'),
+            name: String(item.name ?? ''),
             type: typeof item.type === 'number' ? item.type : Number(item.type ?? 0),
+            icon: String(item.icon ?? ''),
+            sort: Number(item.sort ?? 0),
+            status: Number(item.status ?? 0),
             children: Array.isArray(item.children)
                 ? (item.children as Array<Record<string, unknown>>).map(normalize)
                 : undefined,
         })
         return list.map(normalize)
+    }
+
+    /** 全量权限节点树（权限节点管理用） */
+    async permissionMenuTree(): Promise<PermissionMenuNode[]> {
+        const result = await this.api.post<
+            Array<Record<string, unknown>>,
+            Array<Record<string, unknown>>
+        >('/admin/menus/list', {})
+        return Array.isArray(result) ? result.map(normalizePermissionMenuNode) : []
+    }
+
+    /** 新增权限节点 */
+    async createPermissionMenu(params: CreatePermissionMenuParams): Promise<{ id: number }> {
+        return this.api.post<{ id: number }, { id: number }, CreatePermissionMenuParams>(
+            '/admin/menus',
+            params,
+        )
+    }
+
+    /** 编辑权限节点 */
+    async updatePermissionMenu(id: number, params: UpdatePermissionMenuParams): Promise<void> {
+        await this.api.put<void, void, UpdatePermissionMenuParams>(
+            `/admin/menus/${encodeURIComponent(id)}`,
+            params,
+        )
+    }
+
+    /** 删除权限节点 */
+    async deletePermissionMenu(id: number, params: DeletePermissionMenuParams): Promise<void> {
+        await this.api.delete<void, void, DeletePermissionMenuParams>(
+            `/admin/menus/${encodeURIComponent(id)}`,
+            { data: params },
+        )
+    }
+
+    /** 启用或禁用权限节点 */
+    async updatePermissionMenuStatus(
+        id: number,
+        params: UpdatePermissionMenuStatusParams,
+    ): Promise<void> {
+        await this.api.post<void, void, UpdatePermissionMenuStatusParams>(
+            `/admin/menus/status/${encodeURIComponent(id)}`,
+            params,
+        )
+    }
+
+    /** 移动权限节点父级并调整排序 */
+    async movePermissionMenu(id: number, params: MovePermissionMenuParams): Promise<void> {
+        await this.api.post<void, void, MovePermissionMenuParams>(
+            `/admin/menus/move/${encodeURIComponent(id)}`,
+            params,
+        )
     }
 
     /** 角色已勾选的菜单 ID 列表 */

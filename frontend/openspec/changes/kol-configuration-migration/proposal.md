@@ -1,3 +1,7 @@
+## 归档状态
+
+本变更记录为历史迁移上下文，当前 `src/views` 中已不包含对应 `KolConfiguration` 页面，不应作为当前源码存在性的依据。新增或修复页面时请以 `src/routes/permissionRoutes.ts` 和实际 `src/views` 目录为准。
+
 ## Why
 
 旧项目 KolConfiguration 模块（KOL推广计划）使用 Ant Design Vue + Options API + 手写表格骨架，需迁移到新项目的 Arco Design + `<script setup>` + TableSearchWrap 架构，消除技术债并统一代码规范。
@@ -5,6 +9,7 @@
 ## What Changes
 
 **旧项目文件清单（5 个 .vue 文件）：**
+
 - `KolConfiguration/KOLInvitationList/Index.vue` — KOL申请列表（列表+导出）
 - `KolConfiguration/AgentCardOpeningConfiguration/Index.vue` — KOL开卡配置（列表+新增/编辑）
 - `KolConfiguration/AgentCardOpeningConfiguration/AddOrUpdata.vue` — 开卡配置新增/编辑弹窗
@@ -12,12 +17,14 @@
 - `KolConfiguration/RebateBusinessConfiguration/components/AddEditExamine.vue` — 返佣配置新增/编辑/查看弹窗
 
 **新增/迁移内容：**
+
 - 新建 `src/views/KolConfiguration/` 模块目录，包含 3 个子页面
 - 补全 `src/api/kolConfiguration/index.ts`：新增 7 个缺失的 API 方法（见下方 Impact）
 - 新增 `src/enums/statusText.ts` 中的 `kolRebateState` preset（状态：已开启/已关闭）
 - 注册路由到 `src/routes/permissionRoutes.ts`（`/kolConfiguration` 父路由 + 3 个子路由）
 
 **迁移时修复的技术债：**
+
 - 手写 `<a-form>` + `<a-table>` + `<Pagination>` 三件套 → TableSearchWrap
 - `defineComponent` + Options API → `<script setup>`
 - `ant-design-vue` 组件 → `@arco-design/web-vue` 等价组件
@@ -33,11 +40,13 @@
 ## Capabilities
 
 ### New Capabilities
+
 - `kol-invitation-list`：KOL申请列表，支持邮箱/阶梯费率搜索、导出
 - `kol-opening-config`：KOL开卡配置，支持合伙人UID搜索、新增/编辑、UID关联用户信息查询
 - `kol-rebate-config`：返佣业务配置，支持多条件搜索、批量开启/关闭/删除、单条启停、新增/编辑/查看
 
 ### Modified Capabilities
+
 （无已有 spec 需修改）
 
 ## Impact
@@ -45,12 +54,14 @@
 **API 层：`src/api/kolConfiguration/index.ts`**
 
 新项目现有方法（已迁移，仅需整理类型）：
+
 - `fetchGetKolInfluencerList` — KOL列表
 - `fetchEnableKolInfluencer` — KOL启用/禁用/取消身份
 - `fetchGetKolInfluencerExistUser` — 校验UID
 - `fetchGetKolInfluencerAdd` — 新增KOL
 
 缺失、需补充的方法：
+
 - `fetchgetOpenConfigList` — KOL开卡配置列表（GET `/agent/openConfig/list`）
 - `fetchgetOpenConfigAddOrUpdate` — 新增/编辑开卡配置（POST `/agent/openConfig/addOrUpdate`）
 - `fetchgetOpenConfigDel` — 删除开卡配置（GET `/agent/openConfig/del`）
@@ -64,6 +75,7 @@
 
 **路由：`src/routes/permissionRoutes.ts`**
 新增 `/kolConfiguration` 父路由及 3 个子路由：
+
 - `rebateBusinessConfiguration` — 返佣业务配置
 - `agentCardOpeningConfiguration` — KOL开卡配置
 - `invitationList` — KOL申请列表

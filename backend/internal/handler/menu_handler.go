@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"strconv"
 
 	"auth-service/internal/consts"
@@ -63,6 +64,15 @@ func (h *Handler) CreateMenu(c *gin.Context) {
 		response.Error(c, consts.BadRequest, "参数错误")
 		return
 	}
+	if !h.requireCurrentTwoFA(
+		c,
+		input.FACode,
+		input.FAChallengeID,
+		service.TwoFAActionMenuCreate,
+		fmt.Sprintf("parent:%d:key:%s", input.ParentID, input.Name),
+	) {
+		return
+	}
 
 	id, err := h.menus.Create(c.Request.Context(), input)
 	if err != nil {
@@ -86,6 +96,9 @@ func (h *Handler) UpdateMenu(c *gin.Context) {
 		response.Error(c, consts.BadRequest, "参数错误")
 		return
 	}
+	if !h.requireCurrentTwoFA(c, input.FACode, input.FAChallengeID, service.TwoFAActionMenuUpdate, menuTarget(id)) {
+		return
+	}
 
 	if err := h.menus.Update(c.Request.Context(), id, input); err != nil {
 		writeServiceError(c, err)
@@ -103,12 +116,115 @@ func (h *Handler) DeleteMenu(c *gin.Context) {
 		return
 	}
 
-	if err := h.menus.Delete(c.Request.Context(), id); err != nil {
+	var input struct {
+		FACode        string `json:"facode" binding:"required"`
+		FAChallengeID string `json:"fa_challenge_id" binding:"required"`
+		Cascade       bool   `json:"cascade"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, consts.BadRequest, "参数错误")
+		return
+	}
+	if !h.requireCurrentTwoFA(c, input.FACode, input.FAChallengeID, service.TwoFAActionMenuDelete, menuTarget(id)) {
+		return
+	}
+
+	if err := h.menus.Delete(c.Request.Context(), id, input.Cascade); err != nil {
 		writeServiceError(c, err)
 		return
 	}
 
 	response.Success(c, gin.H{})
+}
+
+// UpdateMenuStatus 更新菜单状态
+func (h *Handler) UpdateMenuStatus(c *gin.Context) {
+	id, err := parseID(c)
+	if err != nil {
+		response.Error(c, consts.BadRequest, "无效的菜单 ID")
+		return
+	}
+
+	var input struct {
+		Status        *int   `json:"status" binding:"required"`
+		FACode        string `json:"facode" binding:"required"`
+		FAChallengeID string `json:"fa_challenge_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, consts.BadRequest, "参数错误")
+		return
+	}
+	if !h.requireCurrentTwoFA(c, input.FACode, input.FAChallengeID, service.TwoFAActionMenuStatus, menuTarget(id)) {
+		return
+	}
+
+	if err := h.menus.UpdateStatus(c.Request.Context(), id, *input.Status); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.Success(c, gin.H{})
+}
+
+// MoveMenu 移动菜单父级并更新排序
+func (h *Handler) MoveMenu(c *gin.Context) {
+	id, err := parseID(c)
+	if err != nil {
+		response.Error(c, consts.BadRequest, "无效的菜单 ID")
+		return
+	}
+
+	var input struct {
+		ParentID      *int64 `json:"parent_id" binding:"required"`
+		Sort          int    `json:"sort"`
+		FACode        string `json:"facode" binding:"required"`
+		FAChallengeID string `json:"fa_challenge_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.Error(c, consts.BadRequest, "参数错误")
+		return
+	}
+	if !h.requireCurrentTwoFA(c, input.FACode, input.FAChallengeID, service.TwoFAActionMenuMove, menuTarget(id)) {
+		return
+	}
+
+	if err := h.menus.Move(c.Request.Context(), id, service.MoveMenuInput{
+		ParentID: *input.ParentID,
+		Sort:     input.Sort,
+	}); err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	response.Success(c, gin.H{})
+}
+
+func (h *Handler) requireCurrentTwoFA(
+	c *gin.Context,
+	code string,
+	challengeID string,
+	action string,
+	target string,
+) bool {
+	adminUserID := middleware.GetAdminUserID(c)
+	if adminUserID == 0 {
+		response.Error(c, consts.Unauthorized, "用户未登录")
+		return false
+	}
+	if err := h.users.ValidateCurrentTwoFA(
+		c.Request.Context(),
+		adminUserID,
+		code,
+		challengeID,
+		action,
+		target,
+	); err != nil {
+		writeServiceError(c, err)
+		return false
+	}
+	return true
+}
+
+func menuTarget(id int64) string {
+	return "menu:" + strconv.FormatInt(id, 10)
 }
 
 // parseID 从路径参数 :id 解析 int64，解析失败时返回 error

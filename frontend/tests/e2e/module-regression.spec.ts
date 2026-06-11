@@ -1,5 +1,5 @@
 import { expect, type Page, test } from '@playwright/test'
-import { mockMenuSmokeApis, setAuthCookie } from './helpers/mockMenuSmoke'
+import { LIST_MENU_CASES, mockMenuSmokeApis, setAuthCookie } from './helpers/mockMenuSmoke'
 import { attachRuntimeGuard } from './helpers/runtimeGuard'
 
 type ApiCounter = {
@@ -58,7 +58,9 @@ async function runSearchAndResetFlow(page: Page, counter: ApiCounter) {
     const resetButton = page.getByRole('button', { name: /^(重置|Reset)$/i }).first()
 
     if (!(await searchButton.isVisible().catch(() => false))) {
-        const moreFilterButton = page.getByRole('button', { name: /更多筛选|More filters/i }).first()
+        const moreFilterButton = page
+            .getByRole('button', { name: /更多筛选|More filters/i })
+            .first()
         if (await moreFilterButton.isVisible().catch(() => false)) {
             await moreFilterButton.click()
         }
@@ -87,90 +89,67 @@ async function runSearchAndResetFlow(page: Page, counter: ApiCounter) {
     await expectApiCountIncrease(counter, beforeTyping, '输入快捷搜索后未触发接口请求')
 }
 
+async function runPermissionLabSearchAndResetFlow(page: Page) {
+    const orderInput = page.getByPlaceholder(/搜索订单号|Search Order No\./i)
+
+    await orderInput.fill('LAB-20260607-002')
+
+    await expect(page.getByRole('row', { name: /LAB-20260607-002/ })).toBeVisible()
+    await expect(page.getByRole('row', { name: /LAB-20260607-001/ })).toHaveCount(0)
+    await expect(page.getByRole('row', { name: /LAB-20260607-003/ })).toHaveCount(0)
+
+    await page.getByRole('button', { name: /更多筛选|More Filters/i }).click()
+    const resetButton = page.getByRole('button', { name: /^(重置|Reset)$/i })
+    await resetButton.click()
+
+    await expect(page.getByRole('row', { name: /LAB-20260607-001/ })).toBeVisible()
+    await expect(page.getByRole('row', { name: /LAB-20260607-002/ })).toBeVisible()
+    await expect(page.getByRole('row', { name: /LAB-20260607-003/ })).toBeVisible()
+}
+
 test.describe('module interaction regression', () => {
-    test('user module supports search and reset flow', async ({ page }) => {
-        const runtime = attachRuntimeGuard(page)
-        await mockMenuSmokeApis(page)
-        await setAuthCookie(page)
-        const apiCounter = createApiCounter(page)
+    for (const item of LIST_MENU_CASES) {
+        if (item.path === '/systemManage/rolePermissions') {
+            test(`${item.label} renders current module route`, async ({ page }) => {
+                const runtime = attachRuntimeGuard(page)
+                await mockMenuSmokeApis(page)
+                await setAuthCookie(page)
 
-        await openListPage(page, '/user/userList')
-        await runSearchAndResetFlow(page, apiCounter)
+                await openListPage(page, item.path)
 
-        runtime.assertNoRuntimeIssue()
-    })
+                runtime.assertNoRuntimeIssue()
+            })
+            continue
+        }
 
-    test('flash exchange order module supports tab switch flow', async ({ page }) => {
-        const runtime = attachRuntimeGuard(page)
-        await mockMenuSmokeApis(page)
-        await setAuthCookie(page)
-        const apiCounter = createApiCounter(page)
+        test(`${item.label} supports search and reset flow`, async ({ page }) => {
+            const runtime = attachRuntimeGuard(page)
+            await mockMenuSmokeApis(
+                page,
+                item.role === 'permissionLabOrders'
+                    ? {
+                          permissionLabOrders: [
+                              {
+                                  id: '200',
+                                  name: 'permissionLabOrders-tabAll',
+                                  component: 'permissionLabOrders-tabAll',
+                                  type: 5,
+                              },
+                          ],
+                      }
+                    : {},
+            )
+            await setAuthCookie(page)
+            const apiCounter = createApiCounter(page)
 
-        await openListPage(page, '/flashExchange/orderManagement')
-        await runSearchAndResetFlow(page, apiCounter)
+            await openListPage(page, item.path)
+            if (item.role === 'permissionLabOrders') {
+                await runPermissionLabSearchAndResetFlow(page)
+            } else {
+                await runSearchAndResetFlow(page, apiCounter)
+            }
 
-        const historyTab = page.getByRole('tab', { name: /历史委托|History/i })
-        const detailTab = page.getByRole('tab', { name: /成交详情|Detail/i })
-
-        const beforeHistoryTab = apiCounter.getCount()
-        await historyTab.click()
-        await expect(historyTab).toHaveAttribute('aria-selected', 'true')
-        await expectApiCountIncrease(apiCounter, beforeHistoryTab, '切换到历史委托后未触发接口请求')
-
-        const beforeDetailTab = apiCounter.getCount()
-        await detailTab.click()
-        await expect(detailTab).toHaveAttribute('aria-selected', 'true')
-        await expectApiCountIncrease(apiCounter, beforeDetailTab, '切换到成交详情后未触发接口请求')
-        await expect(page.locator('.arco-table').first()).toBeVisible()
-
-        runtime.assertNoRuntimeIssue()
-    })
-
-    test('invitation rebate module supports search and reset flow', async ({ page }) => {
-        const runtime = attachRuntimeGuard(page)
-        await mockMenuSmokeApis(page)
-        await setAuthCookie(page)
-        const apiCounter = createApiCounter(page)
-
-        await openListPage(page, '/invitation-rebate-manage/invitationRebate')
-        await runSearchAndResetFlow(page, apiCounter)
-
-        runtime.assertNoRuntimeIssue()
-    })
-
-    test('asset module supports search and reset flow', async ({ page }) => {
-        const runtime = attachRuntimeGuard(page)
-        await mockMenuSmokeApis(page)
-        await setAuthCookie(page)
-        const apiCounter = createApiCounter(page)
-
-        await openListPage(page, '/asset/userAssetList')
-        await runSearchAndResetFlow(page, apiCounter)
-
-        runtime.assertNoRuntimeIssue()
-    })
-
-    test('system module supports search and reset flow', async ({ page }) => {
-        const runtime = attachRuntimeGuard(page)
-        await mockMenuSmokeApis(page)
-        await setAuthCookie(page)
-        const apiCounter = createApiCounter(page)
-
-        await openListPage(page, '/systemManage/operationLog')
-        await runSearchAndResetFlow(page, apiCounter)
-
-        runtime.assertNoRuntimeIssue()
-    })
-
-    test('kol module supports search and reset flow', async ({ page }) => {
-        const runtime = attachRuntimeGuard(page)
-        await mockMenuSmokeApis(page)
-        await setAuthCookie(page)
-        const apiCounter = createApiCounter(page)
-
-        await openListPage(page, '/kolConfiguration/invitationList')
-        await runSearchAndResetFlow(page, apiCounter)
-
-        runtime.assertNoRuntimeIssue()
-    })
+            runtime.assertNoRuntimeIssue()
+        })
+    }
 })

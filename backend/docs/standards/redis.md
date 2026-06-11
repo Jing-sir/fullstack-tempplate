@@ -17,6 +17,9 @@ Examples:
 auth-service:dev:security:iv:{uuid}
 auth-service:prod:user:profile:{uid}
 auth-service:prod:rate-limit:login:{ip}
+auth-service:prod:security:2fa:challenge:{uuid}
+auth-service:prod:security:2fa:failures:{admin_user_id}
+auth-service:prod:security:2fa:used:{admin_user_id}:{totp_counter}
 ```
 
 ## TTL Rules
@@ -80,5 +83,9 @@ auth-service:prod:rate-limit:login:{ip}
 ## Project Rules
 
 - Login IV keys must be one-time-use where clients send `iv_id`.
+- 2FA challenge 绑定管理员 ID、服务端动作和目标哈希，TTL 固定为 2 分钟，成功后删除。
+- 2FA 失败计数按管理员维度保存 10 分钟，第 5 次失败起拒绝高风险操作。
+- 已使用 TOTP 时间片按管理员维度保存 90 秒；challenge 消费、防重放写入和失败计数清理必须由 Lua 原子完成。
+- 2FA 安全状态依赖 Redis 且必须 fail closed，Redis 异常时不得继续高风险写操作。
 - New Redis key families must be documented in this file or adjacent package comments.
 - New Redis usage must have tests around key construction and expiry behavior when practical.

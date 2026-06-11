@@ -101,6 +101,11 @@ const refreshPermissionStore = (): Promise<void> => {
     return request
 }
 
+const isSidebarMenuListRequest = (url: unknown): boolean => {
+    const path = String(url ?? '').split('?')[0]
+    return path === '/menus/list' || path.endsWith('/api/v1/menus/list')
+}
+
 const syncPermissionVersion = async (response?: AxiosResponse): Promise<void> => {
     const nextVersion = String(response?.headers?.[PERMISSION_VERSION_HEADER] ?? '').trim()
     if (!nextVersion || !getManageToken()) return
@@ -110,7 +115,7 @@ const syncPermissionVersion = async (response?: AxiosResponse): Promise<void> =>
     if (!previousVersion || previousVersion === nextVersion) return
 
     // 当前响应本身就是最新菜单时，Store 会直接消费它，无需再次发起菜单请求。
-    if (String(response?.config.url ?? '').endsWith('/menus/list')) return
+    if (isSidebarMenuListRequest(response?.config.url)) return
     await refreshPermissionStore()
 }
 

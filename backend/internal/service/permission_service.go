@@ -11,12 +11,16 @@ import (
 // ErrPermissionDenied 表示当前账号没有请求所需的权限
 var ErrPermissionDenied = errors.New("权限不足")
 
-// MeResult 是 GET /api/v1/userInfo 的响应结构，只含用户基本信息
+// MeResult 是当前登录管理员信息响应结构，只含安全可暴露的基本信息
 type MeResult struct {
-	UID      string `json:"uid"`
-	Username string `json:"username"`
-	Email    string `json:"email"`
-	Status   int    `json:"status"`
+	UID          string `json:"uid"`
+	Username     string `json:"username"`
+	RealName     string `json:"real_name"`
+	Email        string `json:"email"`
+	Phone        string `json:"phone"`
+	TwoFAEnabled bool   `json:"two_fa_enabled"`
+	Status       int    `json:"status"`
+	Avatar       string `json:"avatar"`
 }
 
 // PermissionService 负责权限查询业务逻辑
@@ -36,10 +40,14 @@ func NewPermissionService(roles RoleStore, menus MenuStore) *PermissionService {
 // GetMe 返回当前登录管理员的基本信息
 func (s *PermissionService) GetMe(ctx context.Context, user *model.AdminUser) (MeResult, error) {
 	return MeResult{
-		UID:      user.UID,
-		Username: user.Username,
-		Email:    user.Email,
-		Status:   user.Status,
+		UID:          user.UID,
+		Username:     user.Username,
+		RealName:     user.RealName,
+		Email:        user.Email,
+		Phone:        user.Phone,
+		TwoFAEnabled: user.TwoFAEnabled,
+		Status:       user.Status,
+		Avatar:       user.Avatar,
 	}, nil
 }
 

@@ -75,25 +75,26 @@ AI 不能凭感觉写：
 
 完整规则以 `AGENTS.md` 为准。这里是最重要的：
 
-| 场景 | 必须这样做 | 禁止这样做 |
-| --- | --- | --- |
-| 列表页 | 使用 `TableSearchWrap` | 手写搜索区 + `a-table` + 分页 |
-| 搜索配置 | `computed<SearchOption[]>` | 普通数组写死 |
-| 表格列 | `computed<ColumnType[]>` | 模板里写复杂表达式 |
-| 导出 | `exportConfig` | 页面手写导出按钮 |
-| 工具栏按钮 | `toolbarButtons` | 自己写权限按钮区域 |
-| 行操作按钮 | `cellPreset.type = 'actionButtons'` | 手写操作列 slot |
-| UID/编号/单号 | `cellPreset.type = 'copyableText'`，后面展示复制 icon，复制后提示成功/失败 | 默认省略号、静默复制或手写复制 slot |
-| 状态列 | `cellPreset.type = 'statusText'` | 页面里写状态 map |
-| 标签列 | `cellPreset.type = 'labelTags'` | 手写 `a-tag` 循环 |
-| API | 后端 URL 必须使用固定版本前缀 `/api/v{数字}`，例如 `/api/v1/login`；前端通过 `VITE_APP_BASE_URL=/api/v1` + API 方法路径 `/login` 拼出完整地址 | 写 `/api/login`、`/login` 直连后端、组件里直接 `axios` |
-| API 模块 | 按 URL 前缀放 `src/api`，继承 `Api` | 组件里直接 `axios` |
-| 弹窗/抽屉 | 页面目录 `modal/`，父页面 `v-if` 挂载 | 浮层混进 `components/` |
-| 二次确认 | `useConfirmAction().confirmAndRun` | 每页手写 `Modal.confirm` |
-| 操作提示 | `Message.success/error/warning(t('中文'))` | 静默成功或裸中文 |
-| 路由 | 改 `src/routes/permissionRoutes.ts` | 写到页面或 setup |
-| 文案 | `t('中文原文')`，同步语言包 | 英文语义 key 或裸中文 |
-| 包管理 | `pnpm` | 切换其它包管理器 |
+| 场景          | 必须这样做                                                                                                                                    | 禁止这样做                                             |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| 列表页        | 使用 `TableSearchWrap`                                                                                                                        | 手写搜索区 + `a-table` + 分页                          |
+| 搜索配置      | `computed<SearchOption[]>`                                                                                                                    | 普通数组写死                                           |
+| 表格列        | `computed<ColumnType[]>`                                                                                                                      | 模板里写复杂表达式                                     |
+| 导出          | `exportConfig`                                                                                                                                | 页面手写导出按钮                                       |
+| 工具栏按钮    | `toolbarButtons`                                                                                                                              | 自己写权限按钮区域                                     |
+| 行操作按钮    | `cellPreset.type = 'actionButtons'`                                                                                                           | 手写操作列 slot                                        |
+| UID/编号/单号 | `cellPreset.type = 'copyableText'`，后面展示复制 icon，复制后提示成功/失败                                                                    | 默认省略号、静默复制或手写复制 slot                    |
+| 状态列        | `cellPreset.type = 'statusText'`                                                                                                              | 页面里写状态 map                                       |
+| 标签列        | `cellPreset.type = 'labelTags'`                                                                                                               | 手写 `a-tag` 循环                                      |
+| API           | 后端 URL 必须使用固定版本前缀 `/api/v{数字}`，例如 `/api/v1/login`；前端通过 `VITE_APP_BASE_URL=/api/v1` + API 方法路径 `/login` 拼出完整地址 | 写 `/api/login`、`/login` 直连后端、组件里直接 `axios` |
+| API 模块      | 按 URL 前缀放 `src/api`，继承 `Api`                                                                                                           | 组件里直接 `axios`                                     |
+| 弹窗/抽屉     | 页面目录 `modal/`，父页面 `v-if` 挂载                                                                                                         | 浮层混进 `components/`                                 |
+| 二次确认      | `useConfirmAction().confirmAndRun`                                                                                                            | 每页手写 `Modal.confirm`                               |
+| 2FA 验证      | 统一调用 `src/components/GoogleCode.vue` 独立六格验证码弹窗；业务确认完成后再打开 2FA 弹窗                                                    | 在业务表单、Modal、Drawer 中直接写 `facode` 普通输入框 |
+| 操作提示      | `Message.success/error/warning(t('中文'))`                                                                                                    | 静默成功或裸中文                                       |
+| 路由          | 改 `src/routes/permissionRoutes.ts`                                                                                                           | 写到页面或 setup                                       |
+| 文案          | `t('中文原文')`，同步语言包                                                                                                                   | 英文语义 key 或裸中文                                  |
+| 包管理        | `pnpm`                                                                                                                                        | 切换其它包管理器                                       |
 
 常用参考：
 
@@ -105,11 +106,11 @@ AI 不能凭感觉写：
 - 标准路由模板：`ai-templates/routes/README.md`
 - 菜单权限契约：`ai-templates/permission-contract.md`
 - 表格字段展示契约：`ai-templates/table-cell-contract.md`
-- 标准列表页：`src/views/AssetManage/user-asset-list/Index.vue`
-- 简单列表页：`src/views/AddressList/Index.vue`
+- 标准列表页：`src/views/SystemManage/account-manage/Index.vue`
+- 简单列表页：`src/views/SystemManage/operation-log/Index.vue`
 - 公共列表组件：`src/components/TableSearchWrap/Index.vue`
 - 表格类型：`src/interface/TableType.ts`
-- API 写法：`src/api/userApi/asset/index.ts`
+- API 写法：`src/api/sys/account.ts`
 - 路由写法：`src/routes/permissionRoutes.ts`
 - 确认操作：`src/use/useConfirmAction.ts`
 - 状态 preset：`src/enums/statusText.ts`
@@ -118,24 +119,24 @@ AI 不能凭感觉写：
 
 搜索字段：
 
-| 名称 | 参数名 | 类型 | 选项来源 | 默认值 | 备注 |
-| --- | --- | --- | --- | --- | --- |
-| 用户UID | userId | input | 无 | 无 | 请输入用户UID |
-| 状态 | state | select | 1=正常，2=冻结 | 无 | 不确定就写待确认 |
+| 名称    | 参数名 | 类型   | 选项来源       | 默认值 | 备注             |
+| ------- | ------ | ------ | -------------- | ------ | ---------------- |
+| 用户UID | userId | input  | 无             | 无     | 请输入用户UID    |
+| 状态    | state  | select | 1=正常，2=冻结 | 无     | 不确定就写待确认 |
 
 表格列：
 
-| 标题 | 字段名 | 类型 | 宽度 | 特殊处理 |
-| --- | --- | --- | --- | --- |
-| 创建时间 | createTime | 时间 | 160 | 无 |
-| 用户UID | userId | 普通 | 按项目规则 | 无 |
-| 状态 | state | 状态 | 按项目规则 | 1=正常，2=冻结 |
+| 标题     | 字段名     | 类型 | 宽度       | 特殊处理       |
+| -------- | ---------- | ---- | ---------- | -------------- |
+| 创建时间 | createTime | 时间 | 160        | 无             |
+| 用户UID  | userId     | 普通 | 按项目规则 | 无             |
+| 状态     | state      | 状态 | 按项目规则 | 1=正常，2=冻结 |
 
 操作按钮：
 
-| 名称 | 位置 | buttonKey | 点击行为 | 是否二次确认 | 成功后动作 |
-| --- | --- | --- | --- | --- | --- |
-| 冻结 | 行操作 | freeze / 待确认 | 打开冻结弹窗 | 是 | 刷新列表 |
+| 名称 | 位置   | buttonKey       | 点击行为     | 是否二次确认 | 成功后动作 |
+| ---- | ------ | --------------- | ------------ | ------------ | ---------- |
+| 冻结 | 行操作 | freeze / 待确认 | 打开冻结弹窗 | 是           | 刷新列表   |
 
 注意：
 
@@ -227,7 +228,7 @@ API 信息（没有就写无）：
 - 顶级菜单 icon：
 
 验收标准：
-- 
+-
 ```
 
 ## 9. 模板：迁移旧页面
@@ -277,10 +278,10 @@ API 信息（没有就写无）：
 
 ```text
 完成内容：
-- 
+-
 
 修改文件：
-- 
+-
 
 接口和字段确认：
 - 已确认：
@@ -292,7 +293,7 @@ API 信息（没有就写无）：
 - pnpm run ai:check：通过 / 未通过 / 未运行，原因：
 
 业务验收点：
-- 
+-
 
 风险说明：
 - 无 / 有：
@@ -307,10 +308,10 @@ API 信息（没有就写无）：
 1. `pnpm run typecheck` 通过 —— 没有类型错误
 2. `pnpm exec eslint <改动文件>` 通过 —— 没有 lint 警告
 3. 启动后端后，在浏览器或 curl 验证：
-   - 列表页能正常加载数据（接口返回 `{list, total}` 结构）
-   - 新增/编辑提交后列表刷新、数据落盘
-   - 删除后数据消失
-   - 状态切换后开关状态一致
+    - 列表页能正常加载数据（接口返回 `{list, total}` 结构）
+    - 新增/编辑提交后列表刷新、数据落盘
+    - 删除后数据消失
+    - 状态切换后开关状态一致
 4. API 文件新增方法时，对应页面调用路径要跑通（不能仅靠 typecheck）
 5. 操作日志等中间件要验证数据库有记录（`total > 0`）
 

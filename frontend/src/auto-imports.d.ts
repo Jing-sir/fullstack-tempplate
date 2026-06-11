@@ -104,7 +104,6 @@ declare global {
   const onUnmounted: typeof import('vue').onUnmounted
   const onUpdated: typeof import('vue').onUpdated
   const onWatcherCleanup: typeof import('vue').onWatcherCleanup
-  const permission: typeof import('./store/permission').default
   const protocol: typeof import('./utils/protocol').default
   const provide: typeof import('vue').provide
   const randomString: typeof import('./utils/common').randomString

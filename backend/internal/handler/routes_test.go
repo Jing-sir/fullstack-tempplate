@@ -29,10 +29,18 @@ func TestRegisterRoutesKeepsDynamicParametersAtEnd(t *testing.T) {
 	}
 
 	for _, expected := range []string{
+		"GET /api/v1/user/info",
+		"POST /api/v1/user/password",
+		"POST /api/v1/user/password/check",
+		"POST /api/v1/user/password/2fa/check",
+		"POST /api/v1/user/2fa/replace/setup",
 		"POST /api/v1/permissions/list",
 		"GET /api/v1/roles/info/:id",
 		"GET /api/v1/roles/menus/:id",
 		"PUT /api/v1/roles/menus/:id",
+		"GET /api/v1/admin-users/detail/:userId",
+		"POST /api/v1/admin/menus/status/:id",
+		"POST /api/v1/admin/menus/move/:id",
 	} {
 		if !routes[expected] {
 			t.Fatalf("route %q is not registered", expected)

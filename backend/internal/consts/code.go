@@ -10,6 +10,7 @@ const (
 	Forbidden           BizCode = 403 // 已登录但权限不足
 	NotFound            BizCode = 404 // 资源不存在
 	Conflict            BizCode = 409 // 数据冲突（如重复注册、状态不允许等）
+	TooManyRequests     BizCode = 429 // 请求过于频繁或安全校验失败次数超限
 	InternalServerError BizCode = 500 // 系统内部错误，需运维介入
 	ServiceUnavailable  BizCode = 503 // 服务不可用（依赖组件故障等）
 )
@@ -22,6 +23,7 @@ var BizCodeMsg = map[BizCode]string{
 	Forbidden:           "权限不足",
 	NotFound:            "资源不存在",
 	Conflict:            "数据冲突",
+	TooManyRequests:     "请求过于频繁",
 	InternalServerError: "系统内部错误",
 	ServiceUnavailable:  "服务不可用",
 }

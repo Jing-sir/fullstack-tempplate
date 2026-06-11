@@ -19,15 +19,25 @@ import (
 )
 
 type stubUserStore struct {
-	user       *model.AdminUser
-	listRows   []repository.AdminUserRow
-	listFilter repository.AdminUserFilter
-	updated    model.AdminUser
-	roleID     int64
-	password   string
+	user        *model.AdminUser
+	listRows    []repository.AdminUserRow
+	listFilter  repository.AdminUserFilter
+	updated     model.AdminUser
+	roleID      int64
+	password    string
+	mutationErr error
 }
 
 func (s *stubUserStore) Create(context.Context, model.AdminUser) error {
+	return nil
+}
+
+func (s *stubUserStore) CreateWithRole(_ context.Context, user model.AdminUser, roleID int64) error {
+	if s.mutationErr != nil {
+		return s.mutationErr
+	}
+	s.updated = user
+	s.roleID = roleID
 	return nil
 }
 
@@ -63,6 +73,17 @@ func (s *stubUserStore) EnableTwoFA(context.Context, int64) (int, error) {
 
 func (s *stubUserStore) Update(_ context.Context, user model.AdminUser) error {
 	s.updated = user
+	return nil
+}
+
+func (s *stubUserStore) UpdateWithRole(_ context.Context, user model.AdminUser, roleID *int64) error {
+	if s.mutationErr != nil {
+		return s.mutationErr
+	}
+	s.updated = user
+	if roleID != nil {
+		s.roleID = *roleID
+	}
 	return nil
 }
 
@@ -107,6 +128,52 @@ func (fixedPasswordIVStore) Delete(context.Context, string) error {
 	return nil
 }
 
+type stubTwoFASecurityStore struct {
+	blocked        bool
+	failures       int64
+	consumeErr     error
+	savedAction    string
+	savedTarget    string
+	consumedAction string
+	consumedTarget string
+}
+
+func (s *stubTwoFASecurityStore) SaveChallenge(
+	_ context.Context,
+	_ string,
+	_ int64,
+	action string,
+	target string,
+	_ time.Duration,
+) error {
+	s.savedAction = action
+	s.savedTarget = target
+	return nil
+}
+
+func (s *stubTwoFASecurityStore) IsBlocked(context.Context, int64, int64) (bool, error) {
+	return s.blocked, nil
+}
+
+func (s *stubTwoFASecurityStore) RecordFailure(context.Context, int64, time.Duration) (int64, error) {
+	s.failures++
+	return s.failures, nil
+}
+
+func (s *stubTwoFASecurityStore) ConsumeChallenge(
+	_ context.Context,
+	_ string,
+	_ int64,
+	action string,
+	target string,
+	_ int64,
+	_ time.Duration,
+) error {
+	s.consumedAction = action
+	s.consumedTarget = target
+	return s.consumeErr
+}
+
 func newLoginTestService(t *testing.T, user *model.AdminUser) (*UserService, *config.JWTManager) {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
@@ -115,7 +182,7 @@ func newLoginTestService(t *testing.T, user *model.AdminUser) (*UserService, *co
 	}
 	user.Password = string(hash)
 	jwtManager := config.NewJWTManager("test-secret", time.Hour)
-	return NewUserService(&stubUserStore{user: user}, nil, stubPasswordIVStore{}, jwtManager, "test-key", "test-issuer"), jwtManager
+	return NewUserService(&stubUserStore{user: user}, nil, stubPasswordIVStore{}, nil, jwtManager, "test-key", "test-issuer"), jwtManager
 }
 
 func encryptCurrentUserPassword(t *testing.T, uid, password, iv string) string {
@@ -227,13 +294,15 @@ func TestCheckCurrentUserPasswordAndTwoFAAcceptsEncryptedPassword(t *testing.T) 
 		t.Fatalf("GenerateCode() error = %v", err)
 	}
 	users := &stubUserStore{user: user}
-	service := NewUserService(users, nil, fixedPasswordIVStore{iv: iv}, nil, "test-key", "test-issuer")
+	twoFAStore := &stubTwoFASecurityStore{}
+	service := NewUserService(users, nil, fixedPasswordIVStore{iv: iv}, twoFAStore, nil, "test-key", "test-issuer")
 
 	err = service.CheckCurrentUserPasswordAndTwoFA(context.Background(), user.UID, PasswordCheckInput{
-		UserID:   user.UID,
-		Password: encryptCurrentUserPassword(t, user.UID, "secret", iv),
-		FACode:   code,
-		IVID:     "test-iv-id",
+		UserID:        user.UID,
+		Password:      encryptCurrentUserPassword(t, user.UID, "secret", iv),
+		FACode:        code,
+		FAChallengeID: "challenge-1",
+		IVID:          "test-iv-id",
 	})
 	if err != nil {
 		t.Fatalf("CheckCurrentUserPasswordAndTwoFA() error = %v", err)
@@ -248,9 +317,16 @@ func TestValidateCurrentTwoFARequiresBoundTwoFA(t *testing.T) {
 		Status:       1,
 		TwoFAEnabled: false,
 	}
-	service := &UserService{users: &stubUserStore{user: user}}
+	service := &UserService{users: &stubUserStore{user: user}, twoFA: &stubTwoFASecurityStore{}}
 
-	err := service.ValidateCurrentTwoFA(context.Background(), user.ID, "123456")
+	err := service.ValidateCurrentTwoFA(
+		context.Background(),
+		user.ID,
+		"123456",
+		"challenge-1",
+		TwoFAActionMenuDelete,
+		"menu:1",
+	)
 	if !errors.Is(err, ErrTwoFANotBound) {
 		t.Fatalf("ValidateCurrentTwoFA() error = %v, want ErrTwoFANotBound", err)
 	}
@@ -265,9 +341,16 @@ func TestValidateCurrentTwoFARejectsInvalidCode(t *testing.T) {
 		TwoFAEnabled: true,
 		TwoFASecret:  sql.NullString{String: "JBSWY3DPEHPK3PXP", Valid: true},
 	}
-	service := &UserService{users: &stubUserStore{user: user}}
+	service := &UserService{users: &stubUserStore{user: user}, twoFA: &stubTwoFASecurityStore{}}
 
-	err := service.ValidateCurrentTwoFA(context.Background(), user.ID, "000000")
+	err := service.ValidateCurrentTwoFA(
+		context.Background(),
+		user.ID,
+		"000000",
+		"challenge-1",
+		TwoFAActionMenuDelete,
+		"menu:1",
+	)
 	if !errors.Is(err, ErrInvalidTwoFACode) {
 		t.Fatalf("ValidateCurrentTwoFA() error = %v, want ErrInvalidTwoFACode", err)
 	}
@@ -286,10 +369,112 @@ func TestValidateCurrentTwoFAAcceptsValidCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateCode() error = %v", err)
 	}
-	service := &UserService{users: &stubUserStore{user: user}}
+	service := &UserService{users: &stubUserStore{user: user}, twoFA: &stubTwoFASecurityStore{}}
 
-	if err := service.ValidateCurrentTwoFA(context.Background(), user.ID, code); err != nil {
+	if err := service.ValidateCurrentTwoFA(
+		context.Background(),
+		user.ID,
+		code,
+		"challenge-1",
+		TwoFAActionMenuDelete,
+		"menu:1",
+	); err != nil {
 		t.Fatalf("ValidateCurrentTwoFA() error = %v", err)
+	}
+}
+
+func TestCreateTwoFAChallengeBindsActionAndTarget(t *testing.T) {
+	store := &stubTwoFASecurityStore{}
+	service := &UserService{twoFA: store}
+
+	result, err := service.CreateTwoFAChallenge(
+		context.Background(),
+		7,
+		TwoFAActionMenuDelete,
+		"menu:9",
+	)
+	if err != nil {
+		t.Fatalf("CreateTwoFAChallenge() error = %v", err)
+	}
+	if result.ChallengeID == "" || result.ExpiresIn != 120 {
+		t.Fatalf("result = %#v, want challenge id with 120 second ttl", result)
+	}
+	if store.savedAction != TwoFAActionMenuDelete || store.savedTarget != "menu:9" {
+		t.Fatalf("saved action=%q target=%q", store.savedAction, store.savedTarget)
+	}
+}
+
+func TestValidateCurrentTwoFARejectsReplay(t *testing.T) {
+	user := &model.AdminUser{
+		ID:           1,
+		TwoFAEnabled: true,
+		TwoFASecret:  sql.NullString{String: "JBSWY3DPEHPK3PXP", Valid: true},
+	}
+	code, err := totp.GenerateCode(user.TwoFASecret.String, time.Now())
+	if err != nil {
+		t.Fatalf("GenerateCode() error = %v", err)
+	}
+	store := &stubTwoFASecurityStore{consumeErr: repository.ErrTwoFAReplay}
+	service := &UserService{users: &stubUserStore{user: user}, twoFA: store}
+
+	err = service.ValidateCurrentTwoFA(
+		context.Background(),
+		user.ID,
+		code,
+		"challenge-2",
+		TwoFAActionMenuStatus,
+		"menu:9",
+	)
+	if !errors.Is(err, ErrTwoFAReplay) {
+		t.Fatalf("ValidateCurrentTwoFA() error = %v, want ErrTwoFAReplay", err)
+	}
+}
+
+func TestValidateCurrentTwoFARateLimitsFifthFailure(t *testing.T) {
+	user := &model.AdminUser{
+		ID:           1,
+		TwoFAEnabled: true,
+		TwoFASecret:  sql.NullString{String: "JBSWY3DPEHPK3PXP", Valid: true},
+	}
+	store := &stubTwoFASecurityStore{failures: 4}
+	service := &UserService{users: &stubUserStore{user: user}, twoFA: store}
+
+	err := service.ValidateCurrentTwoFA(
+		context.Background(),
+		user.ID,
+		"000000",
+		"challenge-3",
+		TwoFAActionMenuMove,
+		"menu:9",
+	)
+	if !errors.Is(err, ErrTwoFARateLimited) {
+		t.Fatalf("ValidateCurrentTwoFA() error = %v, want ErrTwoFARateLimited", err)
+	}
+}
+
+func TestValidateCurrentTwoFARejectsMismatchedChallenge(t *testing.T) {
+	user := &model.AdminUser{
+		ID:           1,
+		TwoFAEnabled: true,
+		TwoFASecret:  sql.NullString{String: "JBSWY3DPEHPK3PXP", Valid: true},
+	}
+	code, err := totp.GenerateCode(user.TwoFASecret.String, time.Now())
+	if err != nil {
+		t.Fatalf("GenerateCode() error = %v", err)
+	}
+	store := &stubTwoFASecurityStore{consumeErr: repository.ErrTwoFAChallengeInvalid}
+	service := &UserService{users: &stubUserStore{user: user}, twoFA: store}
+
+	err = service.ValidateCurrentTwoFA(
+		context.Background(),
+		user.ID,
+		code,
+		"challenge-4",
+		TwoFAActionMenuDelete,
+		"menu:10",
+	)
+	if !errors.Is(err, ErrTwoFAChallengeInvalid) {
+		t.Fatalf("ValidateCurrentTwoFA() error = %v, want ErrTwoFAChallengeInvalid", err)
 	}
 }
 
@@ -313,14 +498,16 @@ func TestUpdateCurrentUserPasswordRequiresCurrentTwoFA(t *testing.T) {
 		t.Fatalf("GenerateCode() error = %v", err)
 	}
 	users := &stubUserStore{user: user}
-	service := NewUserService(users, nil, fixedPasswordIVStore{iv: iv}, nil, "test-key", "test-issuer")
+	twoFAStore := &stubTwoFASecurityStore{}
+	service := NewUserService(users, nil, fixedPasswordIVStore{iv: iv}, twoFAStore, nil, "test-key", "test-issuer")
 
 	err = service.UpdateCurrentUserPassword(context.Background(), user.UID, UpdateCurrentPasswordInput{
-		OldPassword: encryptCurrentUserPassword(t, user.UID, "old-secret", iv),
-		Password:    encryptCurrentUserPassword(t, user.UID, "new-secret", iv),
-		FACode:      code,
-		IVID:        "test-iv-id",
-		NewIVID:     "test-new-iv-id",
+		OldPassword:   encryptCurrentUserPassword(t, user.UID, "old-secret", iv),
+		Password:      encryptCurrentUserPassword(t, user.UID, "new-secret", iv),
+		FACode:        code,
+		FAChallengeID: "challenge-1",
+		IVID:          "test-iv-id",
+		NewIVID:       "test-new-iv-id",
 	})
 	if err != nil {
 		t.Fatalf("UpdateCurrentUserPassword() error = %v", err)
@@ -330,6 +517,30 @@ func TestUpdateCurrentUserPasswordRequiresCurrentTwoFA(t *testing.T) {
 	}
 	if bcrypt.CompareHashAndPassword([]byte(users.password), []byte("new-secret")) != nil {
 		t.Fatal("stored password hash does not match new password")
+	}
+}
+
+func TestResetAdminUserPasswordDecryptsOperatorCiphertext(t *testing.T) {
+	iv := "00112233445566778899aabb"
+	operatorUID := "operator-uid"
+	users := &stubUserStore{user: &model.AdminUser{
+		ID:  2,
+		UID: "target-uid",
+	}}
+	service := NewUserService(users, nil, fixedPasswordIVStore{iv: iv}, nil, nil, "test-key", "test-issuer")
+
+	cipherPassword := encryptCurrentUserPassword(t, operatorUID, "new-secret", iv)
+	if err := service.ResetAdminUserPassword(
+		context.Background(),
+		operatorUID,
+		"target-uid",
+		cipherPassword,
+		"test-iv-id",
+	); err != nil {
+		t.Fatalf("ResetAdminUserPassword() error = %v", err)
+	}
+	if bcrypt.CompareHashAndPassword([]byte(users.password), []byte("new-secret")) != nil {
+		t.Fatal("stored password hash does not match decrypted new password")
 	}
 }
 
@@ -372,7 +583,7 @@ func TestUpdateAdminUserUpdatesRealName(t *testing.T) {
 	}
 	service := &UserService{users: users}
 
-	err := service.UpdateAdminUser(context.Background(), AdminUserUpdateInput{
+	err := service.UpdateAdminUser(context.Background(), 99, AdminUserUpdateInput{
 		ID:       "uid-1",
 		FullName: "Alice Chen",
 	})
@@ -381,5 +592,53 @@ func TestUpdateAdminUserUpdatesRealName(t *testing.T) {
 	}
 	if users.updated.RealName != "Alice Chen" {
 		t.Fatalf("updated.RealName = %q, want %q", users.updated.RealName, "Alice Chen")
+	}
+}
+
+func TestCreateAdminUserRejectsSuperadminAssignmentByRegularOperator(t *testing.T) {
+	users := &stubUserStore{}
+	roles := &stubRoleStore{
+		role: &model.Role{ID: 1, Name: systemRoleName, Status: 1},
+		adminRoles: []model.Role{
+			{ID: 2, Name: "operator", Status: 1},
+		},
+	}
+	service := NewUserService(users, roles, stubPasswordIVStore{}, nil, nil, "test-key", "test-issuer")
+
+	err := service.CreateAdminUser(context.Background(), 99, AdminUserCreateInput{
+		Account:  "target",
+		FullName: "Target",
+		RoleID:   "1",
+		State:    1,
+	})
+	if !errors.Is(err, ErrSuperadminAssignmentDenied) {
+		t.Fatalf("CreateAdminUser() error = %v, want ErrSuperadminAssignmentDenied", err)
+	}
+	if users.updated.ID != 0 || users.roleID != 0 {
+		t.Fatal("user mutation ran after forbidden superadmin assignment")
+	}
+}
+
+func TestUpdateAdminUserMapsLastSuperadminProtection(t *testing.T) {
+	users := &stubUserStore{
+		user: &model.AdminUser{
+			ID:       1,
+			UID:      "superadmin-uid",
+			Username: "admin",
+			RealName: "Admin",
+			Status:   1,
+		},
+		mutationErr: repository.ErrLastSuperadmin,
+	}
+	roles := &stubRoleStore{role: &model.Role{ID: 2, Name: "operator", Status: 1}}
+	service := NewUserService(users, roles, stubPasswordIVStore{}, nil, nil, "test-key", "test-issuer")
+
+	err := service.UpdateAdminUser(context.Background(), 99, AdminUserUpdateInput{
+		ID:     "superadmin-uid",
+		RoleID: "2",
+		State:  2,
+	})
+	if !errors.Is(err, ErrLastSuperadmin) {
+		t.Fatalf("UpdateAdminUser() error = %v, want ErrLastSuperadmin", err)
 	}
 }

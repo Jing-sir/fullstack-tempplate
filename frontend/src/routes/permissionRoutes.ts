@@ -157,5 +157,42 @@ const permissionRoutes: RouteRecordRaw[] = [
             },
         ],
     },
+    {
+        path: '/permissionLab',
+        name: 'permissionLab',
+        redirect: 'noRedirect',
+        component: MainLayout,
+        meta: {
+            title: '权限验证中心',
+            icon: 'rolePermissions',
+            requiresAuth: true,
+            permissionKey: 'permissionLab',
+        },
+        children: [
+            {
+                path: 'orders',
+                name: 'permissionLabOrders',
+                component: loadRouteView('PermissionLab/order-list/Index'),
+                meta: {
+                    title: '订单权限样例',
+                    requiresAuth: true,
+                    permissionKey: 'permissionLabOrders',
+                    permissionParent: 'permissionLabOrders',
+                },
+            },
+            {
+                path: 'orderDetail/:id',
+                name: 'permissionLabOrderDetail',
+                component: loadRouteView('PermissionLab/order-detail/Index'),
+                meta: {
+                    title: '订单详情',
+                    isShow: true,
+                    requiresAuth: true,
+                    permissionKey: 'permissionLabOrders-detail',
+                    permissionParent: 'permissionLabOrders',
+                },
+            },
+        ],
+    },
 ]
 export default permissionRoutes;

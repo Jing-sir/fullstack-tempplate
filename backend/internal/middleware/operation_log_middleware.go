@@ -134,6 +134,7 @@ func isSensitiveField(key string, value any) bool {
 		strings.Contains(normalized, "token") ||
 		strings.Contains(normalized, "secret") ||
 		normalized == "facode" ||
+		normalized == "fachallengeid" ||
 		normalized == "otpauthurl" {
 		return true
 	}

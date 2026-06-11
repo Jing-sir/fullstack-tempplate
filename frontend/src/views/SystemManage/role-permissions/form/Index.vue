@@ -6,6 +6,7 @@ import NProgress from 'nprogress';
 import type { TreeNodeKey } from '@arco-design/web-vue/es/tree/interface';
 import type { TreeDataType } from '@/interface/SystemManageType';
 import sysRoleApi from '@/api/sys/role';
+import PermissionNodeManagerDrawer from '../modal/PermissionNodeManagerDrawer.vue';
 
 interface PermissionSummaryItem {
     key: string;
@@ -31,6 +32,7 @@ const currentModuleKey = ref('');
 const searchKeyword = ref('');
 const onlySelected = ref(false);
 const manualExpandedKeys = ref<string[]>([]);
+const isPermissionNodeManagerVisible = ref(false);
 
 const roleId = computed(() => String(route.params.id || ''));
 const see = computed(() => Boolean(route.params.see));
@@ -170,12 +172,16 @@ const visibleTreeData = computed(() => filterTreeNodes(currentModuleTree.value))
 
 const readonlyTreeData = computed<TreeDataType[]>(() => {
     const markReadonly = (nodes: TreeDataType[]): TreeDataType[] =>
-        nodes.map((node) => ({
-            ...node,
-            // 查看模式下所有节点锁定交互；编辑模式下全部可操作。
-            disableCheckbox: see.value,
-            children: markReadonly(node.children ?? []),
-        }));
+        nodes.map((node) => {
+            const { icon: _icon, children, ...treeNode } = node;
+
+            return {
+                ...treeNode,
+                // 查看模式下所有节点锁定交互；编辑模式下全部可操作。
+                disableCheckbox: see.value,
+                children: markReadonly(children ?? []),
+            };
+        });
 
     return markReadonly(visibleTreeData.value);
 });
@@ -192,10 +198,52 @@ const displayedExpandedKeys = computed(() => {
 
 const selectedPermissionCount = computed(() => selectedPermissionList.value.length);
 
+const canManagePermissionNodes = computed(
+    () => !see.value && sidebarStore.hasPermission('rolePermissions-menuManage'),
+);
+
 const handleBack = (): void => {
     router.back();
     if (route.name) {
         tagsViewStore.deleteVisitedViewByName(String(route.name), true);
+    }
+};
+
+// 递归收集节点自身及所有后代的 key
+const getAllDescendantKeys = (node: TreeDataType): string[] => {
+    const keys = [String(node.menuId)];
+    node.children?.forEach((child) => keys.push(...getAllDescendantKeys(child)));
+    return keys;
+};
+
+// 在完整权限树中按 key 查找节点
+const findNodeByKey = (nodes: TreeDataType[], key: string): TreeDataType | null => {
+    for (const node of nodes) {
+        if (String(node.menuId) === key) return node;
+        if (node.children?.length) {
+            const found = findNodeByKey(node.children, key);
+            if (found) return found;
+        }
+    }
+    return null;
+};
+
+// check-strictly 断开父子联动后，在此手动实现：
+// 选中父节点 → 级联选中所有后代；取消父节点 → 级联取消所有后代
+const handleCheck = (
+    _keys: (string | number)[],
+    extra: { checked: boolean; node: TreeDataType },
+): void => {
+    const nodeKey = String(extra.node.menuId);
+    const treeNode = findNodeByKey(allRoleList.value, nodeKey);
+    const affectedKeys = treeNode ? getAllDescendantKeys(treeNode) : [nodeKey];
+
+    if (extra.checked) {
+        const merged = new Set([...currState.checkedKeys, ...affectedKeys]);
+        currState.checkedKeys = Array.from(merged);
+    } else {
+        const removeSet = new Set(affectedKeys);
+        currState.checkedKeys = currState.checkedKeys.filter((k) => !removeSet.has(String(k)));
     }
 };
 
@@ -205,16 +253,29 @@ const handleExpand = (expandedKeys: TreeNodeKey[]): void => {
 };
 
 // 展开/收起只针对当前模块生效，避免用户误以为会影响整棵权限树。
-const expandAll = (): void => {
-    manualExpandedKeys.value = getExpandableKeys(currentModuleTree.value);
-};
+const isAllExpanded = ref(false);
 
-const collapseAll = (): void => {
-    manualExpandedKeys.value = currentModule.value ? [String(currentModule.value.menuId)] : [];
+const toggleExpandAll = (): void => {
+    if (isAllExpanded.value) {
+        manualExpandedKeys.value = currentModule.value ? [String(currentModule.value.menuId)] : [];
+    } else {
+        manualExpandedKeys.value = getExpandableKeys(currentModuleTree.value);
+    }
+    isAllExpanded.value = !isAllExpanded.value;
 };
 
 const focusModule = (moduleKey: string): void => {
     currentModuleKey.value = moduleKey;
+    isAllExpanded.value = false;
+};
+
+const openPermissionNodeManager = (): void => {
+    isPermissionNodeManagerVisible.value = true;
+};
+
+const handlePermissionNodeChanged = async (): Promise<void> => {
+    await fetchRoleList();
+    await sidebarStore.refreshPermissions();
 };
 
 // 从右侧已选清单移除权限时，除了更新 checkedKeys，也同步把当前模块切回该权限所在模块，
@@ -455,11 +516,16 @@ onMounted(async () => {
                                     <a-checkbox v-model="onlySelected">
                                         {{ t('仅看已选') }}
                                     </a-checkbox>
-                                    <a-button size="small" @click="expandAll">
-                                        {{ t('展开全部') }}
+                                    <a-button size="small" @click="toggleExpandAll">
+                                        {{ isAllExpanded ? t('收起全部') : t('展开全部') }}
                                     </a-button>
-                                    <a-button size="small" @click="collapseAll">
-                                        {{ t('收起全部') }}
+                                    <a-button
+                                        v-if="canManagePermissionNodes"
+                                        type="primary"
+                                        size="small"
+                                        @click="openPermissionNodeManager"
+                                    >
+                                        {{ t('管理权限节点') }}
                                     </a-button>
                                 </div>
                             </div>
@@ -468,13 +534,14 @@ onMounted(async () => {
                         <div class="h-0 min-h-0 flex-1 overflow-y-auto p-4">
                             <a-tree
                                 v-if="readonlyTreeData.length"
-                                v-model:checked-keys="currState.checkedKeys"
+                                :checked-keys="currState.checkedKeys"
                                 :expanded-keys="displayedExpandedKeys"
                                 :data="readonlyTreeData"
                                 :field-names="{ children: 'children', title: 'menuName', key: 'menuId' }"
                                 size="small"
                                 checkable
                                 check-strictly
+                                @check="handleCheck"
                                 @expand="handleExpand"
                             />
                             <a-empty
@@ -583,5 +650,10 @@ onMounted(async () => {
                 </div>
             </a-form>
         </a-spin>
+
+        <PermissionNodeManagerDrawer
+            v-model:visible="isPermissionNodeManagerVisible"
+            @success="handlePermissionNodeChanged"
+        />
     </div>
 </template>
