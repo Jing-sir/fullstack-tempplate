@@ -63,20 +63,28 @@ func RegisterRoutes(r *gin.Engine, h *Handler, opLogMiddleware gin.HandlerFunc) 
 		{
 			// 当前用户信息与权限菜单
 			auth.GET("/userInfo", h.GetMe)
+			auth.GET("/user/info", h.GetMe)
 			auth.POST("/menus/list", h.ListMenus)
 			auth.POST("/permissions/list", h.ListPagePermissions)
 
 			// 用户管理
 			auth.POST("/users", h.requireAny("accountManage-add"), h.CreateUser)
 			auth.POST("/users/list", h.requireAny("accountManage"), h.GetUsers)
+			auth.POST("/user/password", h.UpdateCurrentUserPassword)
+			auth.POST("/user/password/check", h.CheckCurrentUserPassword)
+			auth.POST("/user/password/2fa/check", h.CheckCurrentUserPasswordAndTwoFA)
+			auth.POST("/security/2fa/challenges", h.CreateTwoFAChallenge)
 			auth.GET("/user/2fa/setup", h.TwoFASetup)
+			auth.POST("/user/2fa/replace/setup", h.TwoFAReplaceSetup)
 			auth.POST("/user/2fa/verify", h.TwoFAVerify)
 
 			// 菜单管理：全量树供角色权限页读取，写接口仅开放给菜单管理员
-			auth.POST("/admin/menus/list", h.requireAny("rolePermissions-add", "rolePermissions-view", "rolePermissions-edit"), h.ListAllMenus)
+			auth.POST("/admin/menus/list", h.requireAny("rolePermissions-add", "rolePermissions-view", "rolePermissions-edit", "rolePermissions-menuManage"), h.ListAllMenus)
 			auth.POST("/admin/menus", h.requireAny("rolePermissions-menuManage"), h.CreateMenu)
 			auth.PUT("/admin/menus/:id", h.requireAny("rolePermissions-menuManage"), h.UpdateMenu)
 			auth.DELETE("/admin/menus/:id", h.requireAny("rolePermissions-menuManage"), h.DeleteMenu)
+			auth.POST("/admin/menus/status/:id", h.requireAny("rolePermissions-menuManage"), h.UpdateMenuStatus)
+			auth.POST("/admin/menus/move/:id", h.requireAny("rolePermissions-menuManage"), h.MoveMenu)
 
 			// 角色管理
 			auth.POST("/roles/list", h.requireAny("rolePermissions", "accountManage"), h.ListRoles)
@@ -92,6 +100,7 @@ func RegisterRoutes(r *gin.Engine, h *Handler, opLogMiddleware gin.HandlerFunc) 
 			// 管理员账号管理
 			auth.POST("/admin-users/list", h.requireAny("accountManage"), h.ListAdminUsers)
 			auth.GET("/admin-users/detail", h.requireAny("accountManage-edit"), h.GetAdminUserDetail)
+			auth.GET("/admin-users/detail/:userId", h.requireAny("accountManage-edit"), h.GetAdminUserDetail)
 			auth.POST("/admin-users", h.CreateOrUpdateAdminUser)
 			auth.POST("/admin-users/reset-password", h.requireAny("accountManage-resetPassword"), h.ResetAdminUserPassword)
 			auth.POST("/admin-users/reset-2fa", h.requireAny("accountManage-reset2FA"), h.ResetAdminUser2FA)
@@ -232,24 +241,48 @@ func writeServiceError(c *gin.Context, err error) {
 		response.Error(c, consts.BadRequest, "用户名或密码错误")
 	case errors.Is(err, service.ErrInvalidTwoFACode):
 		response.Error(c, consts.BadRequest, "2FA 验证失败")
+	case errors.Is(err, service.ErrTwoFAChallengeInvalid):
+		response.Error(c, consts.BadRequest, err.Error())
+	case errors.Is(err, service.ErrTwoFARateLimited):
+		response.Error(c, consts.TooManyRequests, err.Error())
+	case errors.Is(err, service.ErrTwoFAReplay):
+		response.Error(c, consts.Conflict, err.Error())
 	case errors.Is(err, service.ErrInvalidIV):
 		response.Error(c, consts.BadRequest, "IV 无效或已过期")
 	case errors.Is(err, service.ErrUserExists):
 		response.Error(c, consts.Conflict, "用户已存在")
 	case errors.Is(err, service.ErrTwoFAAlreadyBound):
 		response.Error(c, consts.Conflict, "2FA 已绑定")
+	case errors.Is(err, service.ErrTwoFANotBound):
+		response.Error(c, consts.BadRequest, "当前账号未绑定 2FA")
 	case errors.Is(err, service.ErrUserNotFound):
 		response.Error(c, consts.NotFound, "用户不存在")
 	case errors.Is(err, service.ErrRoleNotFound):
 		response.Error(c, consts.NotFound, "角色不存在")
+	case errors.Is(err, service.ErrRoleNameTaken):
+		response.Error(c, consts.Conflict, "角色标识已存在")
+	case errors.Is(err, service.ErrSystemRoleProtected),
+		errors.Is(err, service.ErrSystemMenuProtected):
+		response.Error(c, consts.Forbidden, err.Error())
+	case errors.Is(err, service.ErrSystemRoleUnavailable):
+		response.Error(c, consts.InternalServerError, err.Error())
 	case errors.Is(err, service.ErrMenuNotFound):
 		response.Error(c, consts.NotFound, "菜单不存在")
+	case errors.Is(err, service.ErrMenuNameTaken):
+		response.Error(c, consts.Conflict, "菜单权限 key 已存在")
 	case errors.Is(err, service.ErrPermissionDenied):
 		response.Error(c, consts.Forbidden, "权限不足")
+	case errors.Is(err, service.ErrSuperadminAssignmentDenied),
+		errors.Is(err, service.ErrLastSuperadmin):
+		response.Error(c, consts.Forbidden, err.Error())
 	case errors.Is(err, service.ErrMenuTypeInvalid),
+		errors.Is(err, service.ErrMenuNameImmutable),
 		errors.Is(err, service.ErrMenuParentInvalid),
 		errors.Is(err, service.ErrMenuHiddenNeedPage),
-		errors.Is(err, service.ErrMenuButtonNeedParent):
+		errors.Is(err, service.ErrMenuButtonNeedParent),
+		errors.Is(err, service.ErrMenuHasChildren),
+		errors.Is(err, service.ErrMenuChildrenInvalid),
+		errors.Is(err, service.ErrMenuStatusInvalid):
 		response.Error(c, consts.BadRequest, err.Error())
 	default:
 		response.Error(c, consts.InternalServerError, "系统内部错误")

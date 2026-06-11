@@ -1,41 +1,50 @@
 # Proposal: 资产管理模块二次迁移
 
+## 归档状态
+
+本变更记录为历史迁移上下文，当前 `src/views` 中已不包含对应 `AssetManage` 页面，不应作为当前源码存在性的依据。新增或修复页面时请以 `src/routes/permissionRoutes.ts` 和实际 `src/views` 目录为准。
+
 ## What & Why
 
 资产管理模块（`src/views/AssetManage/`）在首次迁移时遗漏了若干功能细节，导致按钮权限不生效、破坏性操作未走规范二次确认、弹窗回填失效等问题。本次通过逐文件对比旧项目（`/Desktop/company/new-upay-admin/src/views/Asset/`）与新项目，系统修复所有细节缺失。
 
 ## 旧项目文件清单（11个）
 
-| 旧项目文件 | 对应新项目文件 |
-|---|---|
-| Asset/AssetList.vue | AssetManage/agent-asset-list/Index.vue |
-| Asset/AssetListModal.vue | AssetManage/agent-asset-list/modal/AgentAssetActionModal.vue |
-| Asset/UserAssetList.vue | AssetManage/user-asset-list/Index.vue |
-| Asset/UserListMoadl.vue | AssetManage/user-asset-list/modal/UserAssetFreezeModal.vue |
-| Asset/AssetFreeze.vue | AssetManage/user-asset-freeze/Index.vue |
-| Asset/components/AssetFreezeMoadl.vue | AssetManage/user-asset-freeze/modal/UserAssetThawModal.vue |
-| Asset/AssetFreezeHistory.vue | AssetManage/user-asset-freeze-history/Index.vue |
-| Asset/Transfer.vue | AssetManage/asset-transfer-record/Index.vue |
-| Asset/userAssetsJournal.vue | AssetManage/user-asset-journal/Index.vue |
-| Asset/UserFiatAsset/index.vue | AssetManage/user-fiat-asset/Index.vue |
-| Asset/UserFiatAssetJournal/index.vue | AssetManage/user-fiat-asset-journal/Index.vue |
+| 旧项目文件                            | 对应新项目文件                                               |
+| ------------------------------------- | ------------------------------------------------------------ |
+| Asset/AssetList.vue                   | AssetManage/agent-asset-list/Index.vue                       |
+| Asset/AssetListModal.vue              | AssetManage/agent-asset-list/modal/AgentAssetActionModal.vue |
+| Asset/UserAssetList.vue               | AssetManage/user-asset-list/Index.vue                        |
+| Asset/UserListMoadl.vue               | AssetManage/user-asset-list/modal/UserAssetFreezeModal.vue   |
+| Asset/AssetFreeze.vue                 | AssetManage/user-asset-freeze/Index.vue                      |
+| Asset/components/AssetFreezeMoadl.vue | AssetManage/user-asset-freeze/modal/UserAssetThawModal.vue   |
+| Asset/AssetFreezeHistory.vue          | AssetManage/user-asset-freeze-history/Index.vue              |
+| Asset/Transfer.vue                    | AssetManage/asset-transfer-record/Index.vue                  |
+| Asset/userAssetsJournal.vue           | AssetManage/user-asset-journal/Index.vue                     |
+| Asset/UserFiatAsset/index.vue         | AssetManage/user-fiat-asset/Index.vue                        |
+| Asset/UserFiatAssetJournal/index.vue  | AssetManage/user-fiat-asset-journal/Index.vue                |
 
 ## 缺失/错误功能清单
 
 ### 1. buttonKey 格式错误（影响全部 6 个有按钮的文件）
+
 所有按钮均使用 `routeName:action` 格式，应改为仅 `action` 名（如 `freeze`、`export`、`snapshot`）。
 受影响文件：agent-asset-list、user-asset-list、user-asset-freeze、asset-transfer-record、user-asset-journal、user-fiat-asset、user-fiat-asset-journal
 
 ### 2. 破坏性操作未用 useConfirmAction
+
 - `user-asset-list/Index.vue`：`handleToggleShowMinus`（展示/不展示负资产）用内联 `Modal.confirm`，应改为 `useConfirmAction`
 
 ### 3. 弹窗 watch 缺少 `{ immediate: true }`
+
 三个弹窗均使用 `v-if` 控制挂载，挂载时 visible 已是 true，watch 不会触发：
+
 - `AgentAssetActionModal.vue`
 - `UserAssetFreezeModal.vue`
 - `UserAssetThawModal.vue`
 
 ### 4. AgentAssetActionModal 中 try/finally 未改为 .finally()
+
 `handleSubmit` 仍使用 `try/finally` 模式重置 loading，需改为 `.finally()` 链式。
 
 ## Non-goals

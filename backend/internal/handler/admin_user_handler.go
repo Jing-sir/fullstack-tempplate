@@ -2,6 +2,7 @@ package handler
 
 import (
 	"auth-service/internal/consts"
+	"auth-service/internal/middleware"
 	"auth-service/internal/response"
 	"auth-service/internal/service"
 
@@ -69,7 +70,10 @@ func (h *Handler) ListAdminUsers(c *gin.Context) {
 
 // GetAdminUserDetail 获取管理员账号详情（编辑页回填）
 func (h *Handler) GetAdminUserDetail(c *gin.Context) {
-	uid := c.Query("userId")
+	uid := c.Param("userId")
+	if uid == "" {
+		uid = c.Query("userId")
+	}
 	if uid == "" {
 		response.Error(c, consts.BadRequest, "缺少 userId 参数")
 		return
@@ -103,7 +107,7 @@ func (h *Handler) CreateOrUpdateAdminUser(c *gin.Context) {
 			return
 		}
 		// 新增
-		err := h.users.CreateAdminUser(c.Request.Context(), service.AdminUserCreateInput{
+		err := h.users.CreateAdminUser(c.Request.Context(), middleware.GetAdminUserID(c), service.AdminUserCreateInput{
 			Account:  body.Account,
 			FullName: body.FullName,
 			RoleID:   body.RoleID,
@@ -122,7 +126,7 @@ func (h *Handler) CreateOrUpdateAdminUser(c *gin.Context) {
 			return
 		}
 		// 更新
-		err := h.users.UpdateAdminUser(c.Request.Context(), service.AdminUserUpdateInput{
+		err := h.users.UpdateAdminUser(c.Request.Context(), middleware.GetAdminUserID(c), service.AdminUserUpdateInput{
 			ID:       body.ID,
 			Account:  body.Account,
 			FullName: body.FullName,
@@ -141,17 +145,34 @@ func (h *Handler) CreateOrUpdateAdminUser(c *gin.Context) {
 // ResetAdminUserPassword 重置管理员密码
 func (h *Handler) ResetAdminUserPassword(c *gin.Context) {
 	var body struct {
-		UserID   string `json:"userId"   binding:"required"`
-		Password string `json:"password" binding:"required"`
-		Facode   string `json:"facode"`
-		Type     int    `json:"type"`
+		UserID        string `json:"userId"         binding:"required"`
+		Password      string `json:"password"       binding:"required"`
+		Facode        string `json:"facode"         binding:"required"`
+		FAChallengeID string `json:"fa_challenge_id" binding:"required"`
+		IVID          string `json:"iv_id"          binding:"required"`
+		Type          int    `json:"type"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		response.Error(c, consts.BadRequest, "参数错误")
 		return
 	}
+	if !h.requireCurrentTwoFA(
+		c,
+		body.Facode,
+		body.FAChallengeID,
+		service.TwoFAActionAdminPasswordReset,
+		"user:"+body.UserID,
+	) {
+		return
+	}
 
-	if err := h.users.ResetAdminUserPassword(c.Request.Context(), body.UserID, body.Password); err != nil {
+	if err := h.users.ResetAdminUserPassword(
+		c.Request.Context(),
+		c.GetString("uid"),
+		body.UserID,
+		body.Password,
+		body.IVID,
+	); err != nil {
 		writeServiceError(c, err)
 		return
 	}
@@ -162,12 +183,21 @@ func (h *Handler) ResetAdminUserPassword(c *gin.Context) {
 // ResetAdminUser2FA 重置管理员 2FA
 func (h *Handler) ResetAdminUser2FA(c *gin.Context) {
 	var body struct {
-		UserID   string `json:"userId"   binding:"required"`
-		Password string `json:"password"`
-		Facode   string `json:"facode"`
+		UserID        string `json:"userId" binding:"required"`
+		Facode        string `json:"facode" binding:"required"`
+		FAChallengeID string `json:"fa_challenge_id" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		response.Error(c, consts.BadRequest, "参数错误")
+		return
+	}
+	if !h.requireCurrentTwoFA(
+		c,
+		body.Facode,
+		body.FAChallengeID,
+		service.TwoFAActionAdminTwoFAReset,
+		"user:"+body.UserID,
+	) {
 		return
 	}
 

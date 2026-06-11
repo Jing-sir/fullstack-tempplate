@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import type { FormInstance } from '@arco-design/web-vue'
 import { Message } from '@arco-design/web-vue'
+import sysAuthApi from '@/api/sys/auth'
 
 const { t } = useI18n()
 
 const props = withDefaults(
     defineProps<{
         loading?: boolean
+        action?: string
+        target?: string
     }>(),
     {
         loading: false,
@@ -14,7 +17,7 @@ const props = withDefaults(
 )
 
 const emits = defineEmits<{
-    setCode: [code: string]
+    setCode: [code: string, challengeID: string]
     cancel: []
 }>()
 
@@ -24,6 +27,7 @@ const visible = ref<boolean>(false)
 const formState = reactive({
     code: '',
 })
+const challengeID = shallowRef('')
 const instantLoading = ref(false)
 let instantLoadingTimer: number | undefined
 
@@ -87,6 +91,7 @@ const formatVerificationCode = (value: string): string | false => {
 
 const closeDialog = (): void => {
     formState.code = ''
+    challengeID.value = ''
     instantLoading.value = false
     clearInstantLoadingTimer()
     formRef.value?.resetFields()
@@ -101,7 +106,7 @@ const onOk = async (): Promise<void> => {
     if (errors) return
 
     startInstantLoading()
-    emits('setCode', formState.code)
+    emits('setCode', formState.code, challengeID.value)
 }
 
 const onCancel = (): void => {
@@ -150,7 +155,24 @@ const onShowDialog = async (val = false): Promise<void> => {
     }
 
     formState.code = ''
+    challengeID.value = ''
     formRef.value?.resetFields()
+    if (props.action) {
+        if (!props.target) {
+            Message.error(t('2FA 验证目标缺失'))
+            return
+        }
+        try {
+            const challenge = await sysAuthApi.createTwoFAChallenge({
+                action: props.action,
+                target: props.target,
+            })
+            challengeID.value = challenge.challenge_id
+        } catch {
+            // 请求层已经展示错误信息，这里只阻止未处理的 Promise 和无 challenge 提交。
+            return
+        }
+    }
     visible.value = val
     await nextTick()
     // 弹窗打开后自动聚焦第一个输入框，方便直接 Command/Ctrl + V。
@@ -167,6 +189,7 @@ defineExpose({ closeDialog, onShowDialog })
         @cancel="onCancel"
         :width="380"
         :footer="false"
+        unmount-on-close
     >
         <a-form ref="formRef" layout="vertical" :model="formState">
             <a-form-item

@@ -30,8 +30,13 @@ export interface TreeDataType {
     menuId: string;
     menuName: string;
     parentId: string;
+    /** 权限 key，对应后端 menus.name */
+    name?: string;
     /** 菜单类型：1=目录 2=菜单页 3=隐藏路由页 4=按钮 5=标签页 */
     type?: number;
+    icon?: string;
+    sort?: number;
+    status?: number;
     checked?: number;
     checkUserPassword?: number;
     disableCheckbox?: boolean;

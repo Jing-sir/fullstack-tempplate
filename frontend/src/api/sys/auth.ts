@@ -72,11 +72,17 @@ interface IVChallenge {
     iv: string
 }
 
+export interface TwoFAChallengeResult {
+    challenge_id: string
+    expires_in: number
+}
+
 interface UpdatePasswordParams {
     oldPassword: string
     password: string
     type: number
     facode: string
+    fa_challenge_id: string
     iv_id?: string
     new_iv_id?: string
 }
@@ -166,6 +172,16 @@ class SysAuthApi extends Api {
 
     async getIVChallenge(): Promise<IVChallenge> {
         return this.api.get<IVChallenge, IVChallenge>('/security/iv')
+    }
+
+    async createTwoFAChallenge(params: {
+        action: string
+        target: string
+    }): Promise<TwoFAChallengeResult> {
+        return this.api.post<TwoFAChallengeResult, TwoFAChallengeResult>(
+            '/security/2fa/challenges',
+            params,
+        )
     }
 
     async pwdIv(): Promise<string> {

@@ -30,7 +30,8 @@ type Menu struct {
 // MenuTree 在 Menu 基础上附加子节点列表，用于接口返回树形结构
 type MenuTree struct {
 	Menu
-	Children []*MenuTree `json:"children,omitempty"`
+	Protected bool        `json:"protected,omitempty"`
+	Children  []*MenuTree `json:"children,omitempty"`
 }
 
 // BuildMenuTree 将扁平 menu 列表构建为树形结构

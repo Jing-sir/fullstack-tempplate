@@ -16,6 +16,7 @@ interface PasswordCheckParams {
     password: string
     userId: string
     facode?: string
+    fa_challenge_id?: string
     iv_id?: string
 }
 

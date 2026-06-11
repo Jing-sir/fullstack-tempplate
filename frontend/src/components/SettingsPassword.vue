@@ -103,7 +103,7 @@ const handleSubmit = async (): Promise<void> => {
     await googleCodeRef.value?.onShowDialog(true)
 }
 
-const handleTwoFAConfirm = async (facode: string): Promise<void> => {
+const handleTwoFAConfirm = async (facode: string, faChallengeID: string): Promise<void> => {
     if (isSubmitLoading.value) return
 
     isSubmitLoading.value = true
@@ -116,6 +116,7 @@ const handleTwoFAConfirm = async (facode: string): Promise<void> => {
             password: encryptedNewPassword,
             type: 1,
             facode,
+            fa_challenge_id: faChallengeID,
             iv_id,
             new_iv_id,
         })
@@ -181,6 +182,8 @@ watch(
         v-if="isGoogleCodeMounted"
         ref="googleCodeRef"
         :loading="isSubmitLoading"
+        action="security.password.update"
+        target="current"
         @set-code="handleTwoFAConfirm"
         @cancel="isGoogleCodeMounted = false"
     />

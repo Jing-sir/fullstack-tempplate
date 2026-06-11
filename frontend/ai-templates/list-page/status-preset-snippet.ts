@@ -6,7 +6,7 @@ import type { StatusMeta } from '@/enums/statusText'
 // 2. 新增下面这个映射常量
 // 3. 在 STATUS_PRESET_MAP 里新增：exampleState: EXAMPLE_STATE_MAP
 
-const EXAMPLE_STATE_MAP: Record<string, StatusMeta> = {
+export const EXAMPLE_STATE_MAP: Record<string, StatusMeta> = {
     '1': { label: '启用', tone: 'success' },
     '2': { label: '禁用', tone: 'danger' },
     启用: { label: '启用', tone: 'success' },

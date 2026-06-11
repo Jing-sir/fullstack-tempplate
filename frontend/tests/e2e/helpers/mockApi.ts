@@ -21,6 +21,9 @@ export async function mockBootstrapApis(page: Page) {
     await page.route('**/api/v1/security/iv**', (route) =>
         fulfillOk(route, { iv_id: 'mock-iv-id', iv: '00112233445566778899aabb' }),
     )
+    await page.route('**/api/v1/security/2fa/challenges', (route) =>
+        fulfillOk(route, { challenge_id: 'mock-2fa-challenge', expires_in: 120 }),
+    )
 
     await page.route('**/api/v1/users**', (route) =>
         fulfillOk(route, {
@@ -32,6 +35,16 @@ export async function mockBootstrapApis(page: Page) {
                     status: 1,
                 },
             ],
+        }),
+    )
+
+    await page.route('**/api/v1/user/info**', (route) =>
+        fulfillOk(route, {
+            uid: 'e2e-user-id',
+            username: 'e2e-admin',
+            real_name: 'E2E Admin',
+            two_fa_enabled: true,
+            status: 1,
         }),
     )
 

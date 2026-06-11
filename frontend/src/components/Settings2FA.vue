@@ -55,6 +55,12 @@ const formState = reactive<FormState>({
 })
 
 const isAddOrEdit = computed(() => ['add', 'edit'].includes(props.type))
+const googleCodeAction = computed(() =>
+    googleCodePurpose.value === 'replaceCurrent' ? 'security.2fa.replace' : undefined,
+)
+const googleCodeTarget = computed(() =>
+    googleCodePurpose.value === 'replaceCurrent' ? 'current' : undefined,
+)
 
 const titleKeyMap: Record<Settings2FAType, string> = {
     add: '绑定2FA',
@@ -163,7 +169,7 @@ const handleVerifySubmit = async (): Promise<void> => {
     await openGoogleCode(props.type === 'login' ? 'verifyLogin' : 'bindNew')
 }
 
-const handleGoogleCode = async (code: string): Promise<void> => {
+const handleGoogleCode = async (code: string, faChallengeID: string): Promise<void> => {
     isSubmitLoading.value = true
     try {
         if (googleCodePurpose.value === 'replaceCurrent') {
@@ -172,6 +178,7 @@ const handleGoogleCode = async (code: string): Promise<void> => {
             const qrcodeResult = await apiUser.replaceUserQrcode({
                 password,
                 facode: code,
+                fa_challenge_id: faChallengeID,
                 userId,
                 iv_id,
             })
@@ -350,6 +357,8 @@ watch(
         v-if="isGoogleCodeMounted"
         ref="googleCodeRef"
         :loading="isSubmitLoading"
+        :action="googleCodeAction"
+        :target="googleCodeTarget"
         @set-code="handleGoogleCode"
         @cancel="isGoogleCodeMounted = false"
     />

@@ -60,6 +60,22 @@ func (r *RoleRepository) GetByID(ctx context.Context, id int64) (*model.Role, er
 	return &role, nil
 }
 
+// GetByName 按角色标识查询角色，不存在时返回 nil, nil
+func (r *RoleRepository) GetByName(ctx context.Context, name string) (*model.Role, error) {
+	var role model.Role
+	err := scanRole(r.db.QueryRowContext(ctx, `
+		SELECT id, name, title, description, status, created_at, updated_at
+		FROM roles WHERE name = $1
+	`, name), &role)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get role by name: %w", err)
+	}
+	return &role, nil
+}
+
 // GetByAdminUserID 返回指定管理员绑定的所有角色
 func (r *RoleRepository) GetByAdminUserID(ctx context.Context, adminUserID int64) ([]model.Role, error) {
 	rows, err := r.db.QueryContext(ctx, `
@@ -92,7 +108,38 @@ func (r *RoleRepository) Create(ctx context.Context, role model.Role) (int64, er
 		VALUES ($1, $2, $3, $4) RETURNING id
 	`, role.Name, role.Title, role.Description, role.Status).Scan(&id)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return 0, ErrDuplicateKey
+		}
 		return 0, fmt.Errorf("create role: %w", err)
+	}
+	return id, nil
+}
+
+// CreateWithMenus 原子新增角色并写入权限集合
+func (r *RoleRepository) CreateWithMenus(ctx context.Context, role model.Role, menuIDs []int64) (int64, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin create role transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var id int64
+	if err := tx.QueryRowContext(ctx, `
+		INSERT INTO roles (name, title, description, status)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, role.Name, role.Title, role.Description, role.Status).Scan(&id); err != nil {
+		if isUniqueViolation(err) {
+			return 0, ErrDuplicateKey
+		}
+		return 0, fmt.Errorf("create role: %w", err)
+	}
+	if err := replaceRoleMenus(ctx, tx, id, menuIDs); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit create role transaction: %w", err)
 	}
 	return id, nil
 }
@@ -108,12 +155,45 @@ func (r *RoleRepository) Update(ctx context.Context, role model.Role) error {
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE roles SET name=$1, title=$2, description=$3, status=$4, updated_at=NOW() WHERE id=$5
 	`, role.Name, role.Title, role.Description, role.Status, role.ID); err != nil {
+		if isUniqueViolation(err) {
+			return ErrDuplicateKey
+		}
 		return fmt.Errorf("update role: %w", err)
 	}
 	if err := bumpPermissionVersionByRoleID(ctx, tx, role.ID); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// UpdateWithMenus 原子更新角色基本信息和权限集合
+func (r *RoleRepository) UpdateWithMenus(ctx context.Context, role model.Role, menuIDs []int64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin update role transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE roles
+		SET name=$1, title=$2, description=$3, status=$4, updated_at=NOW()
+		WHERE id=$5
+	`, role.Name, role.Title, role.Description, role.Status, role.ID); err != nil {
+		if isUniqueViolation(err) {
+			return ErrDuplicateKey
+		}
+		return fmt.Errorf("update role: %w", err)
+	}
+	if err := replaceRoleMenus(ctx, tx, role.ID, menuIDs); err != nil {
+		return err
+	}
+	if err := bumpPermissionVersionByRoleID(ctx, tx, role.ID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit update role transaction: %w", err)
+	}
+	return nil
 }
 
 // Delete 删除角色（级联删除 role_menus / admin_user_roles 关联记录）
@@ -141,12 +221,20 @@ func (r *RoleRepository) SetMenus(ctx context.Context, roleID int64, menuIDs []i
 	}
 	defer func() { _ = tx.Rollback() }() // 已 commit 后调用是 no-op
 
-	// 删除该角色原有权限
+	if err := replaceRoleMenus(ctx, tx, roleID, menuIDs); err != nil {
+		return err
+	}
+	if err := bumpPermissionVersionByRoleID(ctx, tx, roleID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func replaceRoleMenus(ctx context.Context, tx *sql.Tx, roleID int64, menuIDs []int64) error {
 	if _, err := tx.ExecContext(ctx, "DELETE FROM role_menus WHERE role_id=$1", roleID); err != nil {
 		return fmt.Errorf("delete role menus: %w", err)
 	}
-
-	// 批量插入新权限
 	for _, menuID := range menuIDs {
 		if _, err := tx.ExecContext(ctx,
 			"INSERT INTO role_menus (role_id, menu_id) VALUES ($1, $2)", roleID, menuID,
@@ -154,11 +242,7 @@ func (r *RoleRepository) SetMenus(ctx context.Context, roleID int64, menuIDs []i
 			return fmt.Errorf("insert role menu: %w", err)
 		}
 	}
-	if err := bumpPermissionVersionByRoleID(ctx, tx, roleID); err != nil {
-		return err
-	}
-
-	return tx.Commit()
+	return nil
 }
 
 func bumpPermissionVersionByRoleID(ctx context.Context, tx *sql.Tx, roleID int64) error {

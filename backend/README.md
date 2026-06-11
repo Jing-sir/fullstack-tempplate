@@ -24,7 +24,8 @@ for migration in \
   migrations/008_permission_hardening.up.sql \
   migrations/009_business_permissions.up.sql \
   migrations/010_admin_user_real_name.up.sql \
-  migrations/011_permission_version.up.sql
+  migrations/011_permission_version.up.sql \
+  migrations/012_permission_seed.up.sql
 do
   /opt/homebrew/opt/postgresql@17.9/bin/psql mydb -v ON_ERROR_STOP=1 -f "$migration"
 done
@@ -49,9 +50,10 @@ Only forward migrations are mounted into PostgreSQL's initialization directory.
 Rollback files stay under `migrations/` for manual use and are never executed
 automatically during bootstrap.
 
-The current migrations create the schema but do not yet seed the complete
-baseline role and menu tree. A fresh environment still needs an explicit
-permission seed before it can be used as an administrator console.
+The current migrations seed the baseline `superadmin` role, system management
+menu tree, and role-menu bindings. When `SEED_USERNAME` and `SEED_PASSWORD` are
+configured, application startup also binds that seed user to the `superadmin`
+role.
 
 ## Main Endpoints
 
@@ -63,7 +65,12 @@ prefix such as `/api/v2`.
 - `POST /api/v1/users`
 - `GET /api/v1/security/iv`
 - `POST /api/v1/users/list`
+- `GET /api/v1/user/info`
+- `POST /api/v1/user/password`
+- `POST /api/v1/user/password/check`
+- `POST /api/v1/user/password/2fa/check`
 - `GET /api/v1/user/2fa/setup`
+- `POST /api/v1/user/2fa/replace/setup`
 - `POST /api/v1/user/2fa/verify`
 
 Protected endpoints require `Authorization: Bearer <token>`.

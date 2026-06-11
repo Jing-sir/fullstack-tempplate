@@ -40,7 +40,47 @@ func (r *AdminUserRepository) Create(ctx context.Context, user model.AdminUser) 
 		user.Avatar,
 	)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return ErrDuplicateKey
+		}
 		return fmt.Errorf("insert user: %w", err)
+	}
+	return nil
+}
+
+// CreateWithRole 原子新增管理员并绑定角色
+func (r *AdminUserRepository) CreateWithRole(ctx context.Context, user model.AdminUser, roleID int64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin create admin user transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var userID int64
+	if err := tx.QueryRowContext(ctx, `
+		INSERT INTO admin_users (
+			uid, username, real_name, email, phone, password,
+			two_fa_enabled, status, avatar, created_at, updated_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		RETURNING id
+	`, user.UID, user.Username, user.RealName, user.Email, user.Phone, user.Password,
+		user.TwoFAEnabled, user.Status, user.Avatar).Scan(&userID); err != nil {
+		if isUniqueViolation(err) {
+			return ErrDuplicateKey
+		}
+		return fmt.Errorf("insert user: %w", err)
+	}
+	if roleID > 0 {
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO admin_user_roles (admin_user_id, role_id) VALUES ($1, $2)",
+			userID, roleID,
+		); err != nil {
+			return fmt.Errorf("insert user role: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit create admin user transaction: %w", err)
 	}
 	return nil
 }
@@ -246,7 +286,115 @@ func (r *AdminUserRepository) Update(ctx context.Context, user model.AdminUser) 
 		WHERE id=$7
 	`, user.Username, user.RealName, user.Email, user.Phone, user.Status, user.Avatar, user.ID)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return ErrDuplicateKey
+		}
 		return fmt.Errorf("update admin user: %w", err)
+	}
+	return nil
+}
+
+// UpdateWithRole 原子更新管理员信息并按需替换角色
+func (r *AdminUserRepository) UpdateWithRole(ctx context.Context, user model.AdminUser, roleID *int64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin update admin user transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	const superadminMembershipLockKey int64 = 7_400_130_002
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", superadminMembershipLockKey); err != nil {
+		return fmt.Errorf("lock superadmin membership: %w", err)
+	}
+
+	var currentStatus int
+	if err := tx.QueryRowContext(ctx,
+		"SELECT status FROM admin_users WHERE id=$1 FOR UPDATE",
+		user.ID,
+	).Scan(&currentStatus); err != nil {
+		return fmt.Errorf("lock admin user: %w", err)
+	}
+
+	var hadSuperadmin bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM admin_user_roles aur
+			INNER JOIN roles r ON r.id = aur.role_id
+			WHERE aur.admin_user_id=$1 AND r.name='superadmin'
+		)
+	`, user.ID).Scan(&hadSuperadmin); err != nil {
+		return fmt.Errorf("check current superadmin role: %w", err)
+	}
+
+	hasSuperadminAfter := hadSuperadmin
+	if roleID != nil {
+		hasSuperadminAfter = false
+		if *roleID > 0 {
+			if err := tx.QueryRowContext(ctx,
+				"SELECT name='superadmin' FROM roles WHERE id=$1",
+				*roleID,
+			).Scan(&hasSuperadminAfter); err != nil {
+				return fmt.Errorf("check target role: %w", err)
+			}
+		}
+	}
+
+	if hadSuperadmin && currentStatus == 1 && (user.Status != 1 || !hasSuperadminAfter) {
+		var remaining int
+		if err := tx.QueryRowContext(ctx, `
+			SELECT COUNT(DISTINCT u.id)
+			FROM admin_users u
+			INNER JOIN admin_user_roles aur ON aur.admin_user_id = u.id
+			INNER JOIN roles r ON r.id = aur.role_id
+			WHERE r.name='superadmin' AND r.status=1 AND u.status=1 AND u.id<>$1
+		`, user.ID).Scan(&remaining); err != nil {
+			return fmt.Errorf("count remaining superadmins: %w", err)
+		}
+		if remaining == 0 {
+			return ErrLastSuperadmin
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE admin_users
+		SET username=$1, real_name=$2, email=$3, phone=$4, status=$5, avatar=$6,
+		    token_version=CASE WHEN status <> $5 THEN token_version + 1 ELSE token_version END,
+		    updated_at=CURRENT_TIMESTAMP
+		WHERE id=$7
+	`, user.Username, user.RealName, user.Email, user.Phone, user.Status, user.Avatar, user.ID); err != nil {
+		if isUniqueViolation(err) {
+			return ErrDuplicateKey
+		}
+		return fmt.Errorf("update admin user: %w", err)
+	}
+
+	if roleID != nil {
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM admin_user_roles WHERE admin_user_id=$1",
+			user.ID,
+		); err != nil {
+			return fmt.Errorf("delete user roles: %w", err)
+		}
+		if *roleID > 0 {
+			if _, err := tx.ExecContext(ctx,
+				"INSERT INTO admin_user_roles (admin_user_id, role_id) VALUES ($1, $2)",
+				user.ID, *roleID,
+			); err != nil {
+				return fmt.Errorf("insert user role: %w", err)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE admin_users
+			SET permission_version=permission_version+1, updated_at=CURRENT_TIMESTAMP
+			WHERE id=$1
+		`, user.ID); err != nil {
+			return fmt.Errorf("bump permission version: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit update admin user transaction: %w", err)
 	}
 	return nil
 }

@@ -130,21 +130,15 @@ func (h *Handler) AddUpdateRole(c *gin.Context) {
 		if status == 0 {
 			status = 1
 		}
-		id, err := h.roles.Create(c.Request.Context(), service.CreateRoleInput{
+		_, err := h.roles.CreateWithMenus(c.Request.Context(), service.CreateRoleInput{
 			Name:        body.RoleName,
 			Title:       body.RoleName,
 			Description: body.Remark,
 			Status:      status,
-		})
+		}, menuIDs)
 		if err != nil {
 			writeServiceError(c, err)
 			return
-		}
-		if len(menuIDs) > 0 {
-			if err := h.roles.SetMenus(c.Request.Context(), id, menuIDs); err != nil {
-				writeServiceError(c, err)
-				return
-			}
 		}
 	} else {
 		if !h.ensureAnyPermission(c, "rolePermissions-edit") {
@@ -156,16 +150,12 @@ func (h *Handler) AddUpdateRole(c *gin.Context) {
 			response.Error(c, consts.BadRequest, "无效的角色 ID")
 			return
 		}
-		if err := h.roles.Update(c.Request.Context(), roleIDInt, service.UpdateRoleInput{
+		if err := h.roles.UpdateWithMenus(c.Request.Context(), roleIDInt, service.UpdateRoleInput{
 			Name:        body.RoleName,
 			Title:       body.RoleName,
 			Description: body.Remark,
 			Status:      body.State,
-		}); err != nil {
-			writeServiceError(c, err)
-			return
-		}
-		if err := h.roles.SetMenus(c.Request.Context(), roleIDInt, menuIDs); err != nil {
+		}, menuIDs); err != nil {
 			writeServiceError(c, err)
 			return
 		}

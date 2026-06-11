@@ -92,6 +92,11 @@ test('unbound account login opens mandatory 2FA setup modal', async ({ page }) =
 
     await expect(page.getByText(/Set 2FA|设置2FA/i)).toBeVisible()
     await expect(page.locator('input[disabled]')).toHaveValue('TESTSECRET')
+    await page.getByRole('button', { name: /Verify|验证/i }).click()
+    await expect(
+        page.locator('.arco-modal:visible').getByText(/2FA Verification|2FA验证/i),
+    ).toBeVisible()
+    await expect(page.locator('.google-code-input:visible input')).toHaveCount(6)
 
     runtime.assertNoRuntimeIssue()
 })
@@ -112,8 +117,10 @@ test('bound account login opens 2FA verification modal', async ({ page }) => {
     await page.getByPlaceholder(/Please enter password|请输入密码/i).fill('secret')
     await page.getByRole('button', { name: /Log In|登录/i }).click()
 
-    await expect(page.getByText(/2FA Verification|2FA验证/i)).toBeVisible()
-    await expect(page.locator('.google-code-input input')).toHaveCount(6)
+    await expect(
+        page.locator('.arco-modal:visible').getByText(/2FA Verification|2FA验证/i),
+    ).toBeVisible()
+    await expect(page.locator('.google-code-input:visible input')).toHaveCount(6)
 
     runtime.assertNoRuntimeIssue()
 })
